@@ -32,6 +32,15 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - Separate volume for your voice and the computer's sound
 - Import any existing video file and edit it the same way
 
+**Transcribe** (macOS 26 or later)
+
+- One button turns the talking into a transcript, using the speech models built into macOS. The audio never leaves your Mac
+- Lines are marked **You** or **Others**, because your microphone and the computer's sound were recorded separately
+- Search the transcript and click any line to jump to that moment
+- Show the transcript as captions on the video, in the preview and in the export
+- Save it as a text file or as `.srt` subtitles; both follow your cuts
+- Over 50 languages, Arabic among them. macOS downloads a language's model the first time you use it
+
 **Export**
 
 - MP4 in H.264 or HEVC, from 720p up to 4K, at 30 or 60 fps
@@ -39,8 +48,8 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 
 ## Requirements
 
-- macOS 15 (Sequoia) or later. Built and tested on Apple silicon with macOS 26
-- Xcode 16 or later to build (the Swift 6 toolchain)
+- macOS 15 (Sequoia) or later; transcripts need macOS 26. Built and tested on Apple silicon with macOS 26
+- Xcode 26 or later to build
 
 ## Install
 
@@ -93,6 +102,7 @@ Everything is in `~/Movies/Tasjeel`, one folder per recording:
     screen.mov     screen + computer sound + microphone
     camera.mov     webcam (when one was recorded)
     thumb.jpg
+    transcript.json   the transcript, once you create one
 ```
 
 The `.mov` files are ordinary QuickTime movies you can open in any player. Editing never changes them; the edit is only a description in `project.json`. Deleting a recording in the app moves its folder to the Trash.
@@ -115,6 +125,9 @@ A Swift package with two targets and no third-party dependencies:
 | `StudioCompositor.swift` | Plugs the renderer into AVFoundation for playback and export |
 | `CompositionBuilder.swift` | Turns the cut list into a playable composition |
 | `Timing.swift` | Maps between recording time and edited time; zoom easing; auto zoom |
+| `Transcriber.swift` | Runs each audio track through macOS's on-device speech models |
+| `Transcript.swift` | Transcript lines: splitting into readable lines, echo removal, text and SRT export |
+| `CaptionRenderer.swift` | Draws a caption line, including right-to-left text |
 
 ### Development
 
@@ -129,11 +142,18 @@ Three aids for working on the app, none of which are needed for normal use:
 
 - `TASJEEL_LIBRARY=/some/folder` makes the app use that folder instead of `~/Movies/Tasjeel`.
 - `Tasjeel --selftest-record 3` records the main display for three seconds with no UI and prints what was written.
+- `Tasjeel --transcribe <recording folder> --language en-US` transcribes a recording and prints the lines.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
+
+### About transcripts
+
+- Two speech engines ship with macOS 26. Tasjeel uses the newer long-form one where it knows the language (30 locales: English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese) and the dictation engine for the rest (Arabic, Turkish, Hindi, Russian and others). The dictation engine does not add punctuation in every language.
+- Without headphones, your microphone also hears the call coming out of the speakers. Tasjeel drops microphone lines that repeat what the other side said at the same moment, but headphones give the cleanest You / Others split.
+- Accuracy depends on Apple's models and on the audio. The transcript is not editable yet.
 
 ## Not there yet
 
-- Transcripts and captions
+- Editing the transcript, and cutting the video by deleting text
 - Recording a connected iPhone or iPad
 - GIF export
 - Cursor smoothing and click highlights

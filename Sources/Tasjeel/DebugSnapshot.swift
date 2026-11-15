@@ -6,6 +6,7 @@ import TasjeelCore
 /// pictures of its own windows there shortly after launch and then quits.
 /// Set `TASJEEL_SNAPSHOT_EDITOR=look,camera,zoom,audio` (any subset) to also
 /// open the newest recording in the editor and capture each of those tabs.
+/// Set `TASJEEL_SNAPSHOT_TRANSCRIBE=<language>` to recreate the transcript first.
 /// Set `TASJEEL_SNAPSHOT_RECORD=<seconds>` to make a short recording through
 /// the same path as the Start Recording button (add `TASJEEL_SNAPSHOT_CAMERA=1`
 /// to include the first camera). It never takes keyboard focus, so it can run
@@ -38,6 +39,18 @@ enum DebugSnapshot {
                 guard let model = EditorWindows.shared.model(for: entry.id) else { return }
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 if let seconds = env["TASJEEL_SNAPSHOT_TIME"].flatMap(Double.init) { model.seek(toSource: seconds) }
+                // TASJEEL_SNAPSHOT_TRANSCRIBE=<language> recreates the transcript
+                // through the same path as the Create transcript button.
+                if let language = env["TASJEEL_SNAPSHOT_TRANSCRIBE"] {
+                    if model.transcript != nil { model.discardTranscript() }
+                    model.createTranscript(language: language)
+                    var waited = 0.0
+                    while model.transcription != nil, waited < 120 {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        waited += 0.1
+                    }
+                    print("transcribe: lines=\(model.transcript?.segments.count ?? -1) speakers=\(model.transcript?.hasSpeakers ?? false) error=\(model.transcriptError ?? "none") saved=\(FileManager.default.fileExists(atPath: model.directory.appendingPathComponent(ProjectStore.transcriptName).path))")
+                }
                 for tab in tabs {
                     model.tab = EditorModel.Tab(rawValue: tab.capitalized) ?? .look
                     if tab == "zoom", let zoom = model.edit.zooms.first { model.selection = .zoom(zoom.id) }

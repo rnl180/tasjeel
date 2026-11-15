@@ -63,7 +63,7 @@ public final class FrameRenderer: @unchecked Sendable {
     }
 
     public func render(screen: CIImage?, camera: CIImage?, sourceTime: Double, canvas: CGSize,
-                       screenSize: CGSize, edit: EditState) -> CIImage {
+                       screenSize: CGSize, edit: EditState, caption: String? = nil) -> CIImage {
         let layout = RenderLayout(canvas: canvas, screenSize: screenSize, edit: edit, hasCamera: camera != nil)
         let canvasRect = CGRect(origin: .zero, size: canvas)
         var out = backdrop(layout: layout, edit: edit)
@@ -134,7 +134,28 @@ public final class FrameRenderer: @unchecked Sendable {
             ])
         }
 
+        if let caption, let image = captionImage(caption, canvas: canvas) {
+            out = image.composited(over: out)
+        }
+
         return out.cropped(to: canvasRect)
+    }
+
+    /// A caption stays up for seconds, so its picture is drawn once and reused.
+    private func captionImage(_ text: String, canvas: CGSize) -> CIImage? {
+        let key = "cap|\(canvas)|\(text)"
+        lock.lock()
+        if let hit = cache[key] {
+            lock.unlock()
+            return hit
+        }
+        lock.unlock()
+        guard let image = CaptionRenderer.image(text: text, canvas: canvas) else { return nil }
+        lock.lock()
+        if cache.count > 12 { cache.removeAll() }
+        cache[key] = image
+        lock.unlock()
+        return image
     }
 
     // MARK: - Cached static layers

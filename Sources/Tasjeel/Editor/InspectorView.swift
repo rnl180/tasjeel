@@ -16,6 +16,7 @@ struct Inspector: View {
                     case .camera: CameraTab(model: model)
                     case .zoom: ZoomTab(model: model)
                     case .audio: AudioTab(model: model)
+                    case .transcript: TranscriptTab(model: model)
                     }
                 }
                 .padding(.horizontal, 16)

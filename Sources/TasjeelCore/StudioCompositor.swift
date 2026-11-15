@@ -15,15 +15,18 @@ public final class StudioInstruction: NSObject, AVVideoCompositionInstructionPro
     let edit: EditState
     let timeMap: TimeMap
     let screenSize: CGSize
+    /// Transcript lines to draw as captions, sorted by start; empty for none.
+    let captions: [TranscriptSegment]
 
     init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?,
-         edit: EditState, timeMap: TimeMap, screenSize: CGSize) {
+         edit: EditState, timeMap: TimeMap, screenSize: CGSize, captions: [TranscriptSegment]) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.cameraTrackID = cameraTrackID
         self.edit = edit
         self.timeMap = timeMap
         self.screenSize = screenSize
+        self.captions = captions
         var ids: [NSValue] = [NSNumber(value: screenTrackID)]
         if let cameraTrackID { ids.append(NSNumber(value: cameraTrackID)) }
         requiredSourceTrackIDs = ids
@@ -61,9 +64,11 @@ public final class StudioCompositor: NSObject, AVVideoCompositing, @unchecked Se
                 .flatMap { request.sourceFrame(byTrackID: $0) }
                 .map { CIImage(cvPixelBuffer: $0) }
 
+            let caption = instruction.captions.first { sourceTime >= $0.start && sourceTime < $0.end }?.text
+
             let renderer = FrameRenderer.shared
             let image = renderer.render(screen: screen, camera: camera, sourceTime: sourceTime, canvas: canvas,
-                                        screenSize: instruction.screenSize, edit: instruction.edit)
+                                        screenSize: instruction.screenSize, edit: instruction.edit, caption: caption)
             renderer.context.render(image, to: output, bounds: CGRect(origin: .zero, size: canvas), colorSpace: self.colorSpace)
             request.finish(withComposedVideoFrame: output)
         }

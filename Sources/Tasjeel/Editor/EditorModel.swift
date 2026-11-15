@@ -15,7 +15,7 @@ final class EditorModel: ObservableObject {
     }
 
     enum Tab: String, CaseIterable {
-        case look = "Look", camera = "Camera", zoom = "Zoom", audio = "Audio"
+        case look = "Look", camera = "Camera", zoom = "Zoom", audio = "Audio", transcript = "Transcript"
     }
 
     let directory: URL
@@ -39,6 +39,12 @@ final class EditorModel: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
 
+    @Published private(set) var transcript: Transcript?
+    /// Set while a transcript is being created.
+    @Published private(set) var transcription: TranscriptionJob?
+    @Published var transcriptError: String?
+    @Published private(set) var languages: [TranscriptionLanguage] = []
+
     @Published private(set) var exportProgress: Double?
     @Published var exportedURL: URL?
     @Published var exportError: String?
@@ -57,6 +63,12 @@ final class EditorModel: ObservableObject {
     private var seeking = false
     private var saveTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
+    private var transcribeTask: Task<Void, Never>?
+
+    struct TranscriptionJob: Equatable {
+        var progress: Double
+        var status: String
+    }
 
     init(item: LibraryEntry, store: ProjectStore) {
         directory = item.directory
@@ -64,6 +76,7 @@ final class EditorModel: ObservableObject {
         recording = item.recording
         edit = item.recording.edit
         duration = item.recording.duration
+        transcript = store.loadTranscript(in: item.directory)
         player.actionAtItemEnd = .pause
     }
 
@@ -156,7 +169,8 @@ final class EditorModel: ObservableObject {
         guard let media else { return }
         let long = min(1920, Int(max(media.screenSize.width, media.screenSize.height)))
         let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: long)
-        let built = try CompositionBuilder.build(media: media, recording: recording, edit: edit, renderSize: size, fps: 30)
+        let built = try CompositionBuilder.build(media: media, recording: recording, edit: edit, renderSize: size, fps: 30,
+                                                 captions: transcript?.segments ?? [])
         self.built = built
         canvasAspect = size.width / size.height
 
@@ -172,7 +186,7 @@ final class EditorModel: ObservableObject {
     /// Applies look, camera, zoom and volume changes to the running preview.
     private func restyle() {
         guard let built, let item = player.currentItem else { return }
-        let updated = CompositionBuilder.restyled(built, edit: edit)
+        let updated = CompositionBuilder.restyled(built, edit: edit, captions: transcript?.segments ?? [])
         self.built = updated
         item.videoComposition = updated.videoComposition
         item.audioMix = updated.audioMix
@@ -443,7 +457,63 @@ final class EditorModel: ObservableObject {
         saveNow()
     }
 
+    // MARK: - Transcript
+
+    /// The transcript line under the playhead.
+    var activeLineID: UUID? { transcript?.segment(at: currentTime)?.id }
+
+    func loadLanguages() async {
+        guard languages.isEmpty else { return }
+        languages = await Transcriber.languages()
+    }
+
+    func createTranscript(language: String) {
+        guard transcription == nil else { return }
+        transcription = TranscriptionJob(progress: 0, status: "Getting ready…")
+        transcriptError = nil
+        let recording = recording
+        let directory = directory
+        transcribeTask = Task {
+            do {
+                let result = try await Transcriber.transcribe(recording: recording, directory: directory, language: language) { [weak self] progress, status in
+                    Task { @MainActor in
+                        if self?.transcription != nil { self?.transcription = TranscriptionJob(progress: progress, status: status) }
+                    }
+                }
+                transcript = result
+                try? store.saveTranscript(result, in: directory)
+                restyle()
+            } catch is CancellationError {
+                // Cancelled by the user.
+            } catch {
+                transcriptError = error.localizedDescription
+            }
+            transcription = nil
+        }
+    }
+
+    func cancelTranscription() {
+        transcribeTask?.cancel()
+    }
+
+    /// Throws the transcript away so a new one can be made (e.g. in another language).
+    func discardTranscript() {
+        transcript = nil
+        store.deleteTranscript(in: directory)
+        if edit.captions { mutate { $0.captions = false } } else { restyle() }
+    }
+
+    /// The transcript as it applies to the edited video: cut parts left out,
+    /// times matching the export.
+    var editedLines: [TranscriptSegment] { transcript?.edited(with: timeMap) ?? [] }
+
+    func isCut(_ line: TranscriptSegment) -> Bool {
+        let middle = (line.start + line.end) / 2
+        return !edit.segments.contains { $0.contains(middle) }
+    }
+
     func close() {
+        transcribeTask?.cancel()
         exportTask?.cancel()
         saveNow()
         player.pause()
@@ -464,11 +534,12 @@ final class EditorModel: ObservableObject {
         exportedURL = nil
         let edit = edit
         let recording = recording
+        let captions = transcript?.segments ?? []
         exportTask = Task {
             do {
                 let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: settings.longSide)
                 let built = try CompositionBuilder.build(media: media, recording: recording, edit: edit,
-                                                         renderSize: size, fps: Int32(settings.fps))
+                                                         renderSize: size, fps: Int32(settings.fps), captions: captions)
                 try await Exporter.export(built, to: url, codec: settings.codec) { [weak self] progress in
                     Task { @MainActor in
                         if self?.exportProgress != nil { self?.exportProgress = progress }

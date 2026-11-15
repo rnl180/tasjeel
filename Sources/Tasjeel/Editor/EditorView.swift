@@ -17,7 +17,7 @@ struct EditorView: View {
                 }
                 Rectangle().fill(Theme.stroke).frame(width: 1)
                 Inspector(model: model)
-                    .frame(width: 304)
+                    .frame(width: 324)
                     .background(Theme.panel)
             }
             Rectangle().fill(Theme.stroke).frame(height: 1)

@@ -87,8 +87,10 @@ public enum CompositionBuilder {
         return CGSize(width: even(w), height: even(h))
     }
 
-    public static func build(media: LoadedMedia, recording: Recording, edit: EditState,
-                             renderSize: CGSize, fps: Int32 = 30) throws -> BuiltComposition {
+    /// `captions` are transcript lines to draw on the video; they are only
+    /// shown when the edit has captions switched on.
+    public static func build(media: LoadedMedia, recording: Recording, edit: EditState, renderSize: CGSize,
+                             fps: Int32 = 30, captions: [TranscriptSegment] = []) throws -> BuiltComposition {
         let total = media.screenDuration.seconds
         let kept = edit.segments
             .map { TimeSpan(start: max(0, $0.start), end: min(total, $0.end)) }
@@ -151,12 +153,12 @@ public enum CompositionBuilder {
             screenSize: media.screenSize,
             fps: fps
         )
-        return restyled(built, edit: edit)
+        return restyled(built, edit: edit, captions: captions)
     }
 
     /// Re-applies look, zoom, camera and volume changes without touching the
     /// cut list. Cheap enough to run on every slider tick.
-    public static func restyled(_ built: BuiltComposition, edit: EditState) -> BuiltComposition {
+    public static func restyled(_ built: BuiltComposition, edit: EditState, captions: [TranscriptSegment] = []) -> BuiltComposition {
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = StudioCompositor.self
         video.renderSize = built.renderSize
@@ -171,7 +173,8 @@ public enum CompositionBuilder {
                 cameraTrackID: built.cameraTrackID,
                 edit: edit,
                 timeMap: built.timeMap,
-                screenSize: built.screenSize
+                screenSize: built.screenSize,
+                captions: edit.captions ? captions.sorted { $0.start < $1.start } : []
             ),
         ]
 

@@ -34,6 +34,47 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --transcribe <recording folder> [--language en-US] [--save]`
+    ///
+    /// Transcribes a recording and prints the lines. `--save` also writes
+    /// `transcript.json` into the folder, as the editor would.
+    static func transcribe() {
+        let args = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let path = value("--transcribe") else {
+            print("FAIL usage: --transcribe <recording folder>")
+            exit(1)
+        }
+        Task {
+            do {
+                let directory = URL(fileURLWithPath: path, isDirectory: true)
+                let store = ProjectStore(root: directory.deletingLastPathComponent())
+                guard let entry = store.loadAll().first(where: { $0.directory.standardizedFileURL == directory.standardizedFileURL }) else {
+                    print("FAIL no recording in that folder")
+                    exit(1)
+                }
+                let languages = await Transcriber.languages()
+                let language = value("--language") ?? Transcriber.suggestedLanguage(from: languages) ?? "en-US"
+                let started = Date()
+                let transcript = try await Transcriber.transcribe(recording: entry.recording, directory: directory, language: language) { _, _ in }
+                for line in transcript.segments {
+                    let who = TranscriptFormat.speakerName(line.speaker).map { "\($0): " } ?? ""
+                    print(String(format: "%6.2f-%6.2f  ", line.start, line.end) + who + line.text)
+                }
+                if args.contains("--save") { try store.saveTranscript(transcript, in: directory) }
+                print("OK language=\(language) lines=\(transcript.segments.count) audio=\(String(format: "%.1f", entry.recording.duration))s took=\(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription) (\(error))")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

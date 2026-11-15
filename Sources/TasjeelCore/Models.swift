@@ -180,6 +180,8 @@ public struct EditState: Codable, Equatable, Sendable {
     public var zooms: [ZoomSegment]
     public var micVolume: Double
     public var systemVolume: Double
+    /// Draw the transcript onto the video as captions.
+    public var captions: Bool
 
     public init(duration: Double) {
         segments = [TimeSpan(start: 0, end: duration)]
@@ -192,6 +194,7 @@ public struct EditState: Codable, Equatable, Sendable {
         zooms = []
         micVolume = 1
         systemVolume = 1
+        captions = false
     }
 
     // Decoding tolerates missing keys so older project files keep opening.
@@ -207,6 +210,7 @@ public struct EditState: Codable, Equatable, Sendable {
         zooms = try c.decodeIfPresent([ZoomSegment].self, forKey: .zooms) ?? []
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? 1
         systemVolume = try c.decodeIfPresent(Double.self, forKey: .systemVolume) ?? 1
+        captions = try c.decodeIfPresent(Bool.self, forKey: .captions) ?? false
     }
 
     public var keptDuration: Double { segments.reduce(0) { $0 + $1.duration } }

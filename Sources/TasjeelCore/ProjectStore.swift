@@ -31,11 +31,13 @@ public struct LibraryEntry: Identifiable, Equatable, Sendable {
 ///         screen.mov     screen + system audio + microphone
 ///         camera.mov     webcam, when one was recorded
 ///         thumb.jpg
+///         transcript.json   the transcript, once one has been created
 public final class ProjectStore: @unchecked Sendable {
     public static let projectName = "project.json"
     public static let screenName = "screen.mov"
     public static let cameraName = "camera.mov"
     public static let thumbnailName = "thumb.jpg"
+    public static let transcriptName = "transcript.json"
 
     public let root: URL
 
@@ -87,6 +89,26 @@ public final class ProjectStore: @unchecked Sendable {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(recording).write(to: directory.appendingPathComponent(Self.projectName), options: .atomic)
+    }
+
+    // MARK: - Transcripts
+
+    public func loadTranscript(in directory: URL) -> Transcript? {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(Self.transcriptName)) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(Transcript.self, from: data)
+    }
+
+    public func saveTranscript(_ transcript: Transcript, in directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(transcript).write(to: directory.appendingPathComponent(Self.transcriptName), options: .atomic)
+    }
+
+    public func deleteTranscript(in directory: URL) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.transcriptName))
     }
 
     /// Adds an existing video file to the library so it can be edited like a

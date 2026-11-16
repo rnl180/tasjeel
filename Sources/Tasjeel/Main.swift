@@ -12,6 +12,8 @@ enum Main {
             SelfTest.transcribe()
         } else if args.contains("--render") {
             SelfTest.render()
+        } else if args.contains("--notes") {
+            SelfTest.notes()
         } else {
             TasjeelApp.main()
         }

@@ -15,7 +15,7 @@ final class EditorModel: ObservableObject {
     }
 
     enum Tab: String, CaseIterable {
-        case look = "Look", camera = "Camera", zoom = "Zoom", audio = "Audio", transcript = "Transcript"
+        case look = "Look", camera = "Camera", zoom = "Zoom", audio = "Audio", transcript = "Transcript", notes = "Notes"
     }
 
     let directory: URL
@@ -45,6 +45,12 @@ final class EditorModel: ObservableObject {
     @Published var transcriptError: String?
     @Published private(set) var languages: [TranscriptionLanguage] = []
 
+    /// AI notes: title, summary, action items and chapters.
+    @Published private(set) var notes: MeetingNotes?
+    /// Set while notes are being written.
+    @Published private(set) var notesJob: NotesJob?
+    @Published var notesError: String?
+
     @Published private(set) var exportProgress: Double?
     @Published var exportedURL: URL?
     @Published var exportError: String?
@@ -64,10 +70,18 @@ final class EditorModel: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
+    private var notesTask: Task<Void, Never>?
 
     struct TranscriptionJob: Equatable {
         var progress: Double
         var status: String
+    }
+
+    struct NotesJob: Equatable {
+        var progress: Double
+        var status: String
+        /// The model doing the writing, e.g. "Claude Opus 5.5".
+        var engine: String
     }
 
     init(item: LibraryEntry, store: ProjectStore) {
@@ -77,6 +91,7 @@ final class EditorModel: ObservableObject {
         edit = item.recording.edit
         duration = item.recording.duration
         transcript = store.loadTranscript(in: item.directory)
+        notes = store.loadNotes(in: item.directory)
         player.actionAtItemEnd = .pause
     }
 
@@ -534,7 +549,68 @@ final class EditorModel: ObservableObject {
     func discardTranscript() {
         transcript = nil
         store.deleteTranscript(in: directory)
+        notesTask?.cancel()
         if edit.captions { mutate { $0.captions = false } } else { restyle() }
+    }
+
+    // MARK: - Notes
+
+    /// Chapters as they sit on the source timeline, in order.
+    var chapters: [NoteChapter] { (notes?.chapters ?? []).sorted { $0.start < $1.start } }
+
+    /// Chapters re-timed to the edited video, for copying and saving.
+    var editedChapters: [NoteChapter] { notes?.editedChapters(with: timeMap) ?? [] }
+
+    var activeChapterID: UUID? { notes?.chapter(at: currentTime)?.id }
+
+    /// True while the recording still has the name it was given automatically.
+    var hasDefaultTitle: Bool { recording.title.hasPrefix("Recording ") }
+
+    /// Writes notes from the transcript with `model`.
+    func createNotes(with model: any TextModel) {
+        guard notesJob == nil, let transcript else { return }
+        notesJob = NotesJob(progress: 0, status: "Getting ready…", engine: model.displayName)
+        notesError = nil
+        let duration = duration
+        let directory = directory
+        notesTask = Task {
+            do {
+                let result = try await NotesGenerator.notes(for: transcript, duration: duration, model: model) { [weak self] progress, status in
+                    Task { @MainActor in
+                        guard let self, let job = self.notesJob else { return }
+                        // Progress only moves forward, whatever order updates arrive in.
+                        self.notesJob = NotesJob(progress: max(job.progress, progress), status: status, engine: job.engine)
+                    }
+                }
+                notes = result
+                try? store.saveNotes(result, in: directory)
+                // A recording still called "Recording Nov 16 at 4:51 PM" takes
+                // the title the notes came up with; a name you chose is kept.
+                if hasDefaultTitle, !result.title.isEmpty { useNotesTitle() }
+            } catch is CancellationError {
+                // Cancelled by the user.
+            } catch let error as URLError where error.code == .cancelled {
+                // Cancelled by the user.
+            } catch {
+                notesError = error.localizedDescription
+            }
+            notesJob = nil
+        }
+    }
+
+    func cancelNotes() {
+        notesTask?.cancel()
+    }
+
+    func discardNotes() {
+        notes = nil
+        store.deleteNotes(in: directory)
+    }
+
+    func useNotesTitle() {
+        guard let title = notes?.title, !title.isEmpty else { return }
+        _ = EditorWindows.shared.rename(id: recording.id, to: title)
+        AppState.shared.reloadLibrary()
     }
 
     /// The transcript as it applies to the edited video: cut parts left out,

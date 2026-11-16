@@ -135,6 +135,52 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --notes <recording folder> [--engine automatic|apple|ollama|claude] [--model <ollama model>] [--save]`
+    ///
+    /// Writes AI notes from a recording's transcript and prints them as
+    /// Markdown. For `--engine claude` the key is read from the
+    /// `ANTHROPIC_API_KEY` environment variable, never from a file.
+    static func notes() {
+        let args = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let path = value("--notes") else {
+            print("FAIL usage: --notes <recording folder>")
+            exit(1)
+        }
+        Task {
+            do {
+                let directory = URL(fileURLWithPath: path, isDirectory: true)
+                let store = ProjectStore(root: directory.deletingLastPathComponent())
+                guard let entry = store.loadAll().first(where: { $0.directory.standardizedFileURL == directory.standardizedFileURL }) else {
+                    print("FAIL no recording in that folder")
+                    exit(1)
+                }
+                guard let transcript = store.loadTranscript(in: directory) else {
+                    print("FAIL this recording has no transcript yet (run --transcribe ... --save first)")
+                    exit(1)
+                }
+                let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
+                let found = await AIEngines.discover(hasClaudeKey: !(key ?? "").isEmpty)
+                let kind = value("--engine").flatMap { AIEngineKind(rawValue: $0) } ?? .automatic
+                let choice = AIEngines.choose(kind, ollamaModel: value("--model") ?? "", language: transcript.language, found: found)
+                let model = try AIEngines.model(for: choice) { key }
+                let started = Date()
+                let notes = try await NotesGenerator.notes(for: transcript, duration: entry.recording.duration, model: model) { _, _ in }
+                print(NotesFormat.markdown(notes))
+                if args.contains("--save") { try store.saveNotes(notes, in: directory) }
+                print("OK engine=\(notes.engine) chapters=\(notes.chapters.count) actions=\(notes.actionItems.count) took=\(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

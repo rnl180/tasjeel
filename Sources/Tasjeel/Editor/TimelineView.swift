@@ -91,6 +91,8 @@ private enum TimelineMetrics {
     static let zoomTop: CGFloat = 92
     static let zoomHeight: CGFloat = 26
     static let total: CGFloat = 126
+    /// Extra room at the top for the chapter strip, when there are chapters.
+    static let chapters: CGFloat = 20
 }
 
 private struct TimelineTracks: View {
@@ -99,31 +101,41 @@ private struct TimelineTracks: View {
 
     private var pps: CGFloat { width / CGFloat(max(model.duration, 0.1)) }
 
+    /// Everything moves down to make room when the recording has chapters.
+    private var shift: CGFloat { model.chapters.isEmpty ? 0 : TimelineMetrics.chapters }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if !model.chapters.isEmpty {
+                ChapterStrip(model: model, pps: pps)
+                    .frame(width: width, height: TimelineMetrics.chapters - 4, alignment: .topLeading)
+            }
+
             Ruler(duration: model.duration, width: width)
                 .frame(width: width, height: TimelineMetrics.ruler)
+                .offset(y: shift)
 
             clipTrack
                 .frame(width: width, height: TimelineMetrics.clipHeight)
-                .offset(y: TimelineMetrics.clipTop)
+                .offset(y: TimelineMetrics.clipTop + shift)
 
             // One gesture covers ruler and clip: drag to scrub, click to select.
             Color.clear
                 .frame(width: width, height: TimelineMetrics.clipTop + TimelineMetrics.clipHeight)
                 .contentShape(Rectangle())
                 .gesture(scrubGesture)
+                .offset(y: shift)
 
             zoomTrack
                 .frame(width: width, height: TimelineMetrics.zoomHeight)
-                .offset(y: TimelineMetrics.zoomTop)
+                .offset(y: TimelineMetrics.zoomTop + shift)
 
             Playhead()
                 .frame(width: 13, height: TimelineMetrics.total)
-                .offset(x: CGFloat(model.currentTime) * pps - 6.5)
+                .offset(x: CGFloat(model.currentTime) * pps - 6.5, y: shift)
                 .allowsHitTesting(false)
         }
-        .frame(width: width, height: TimelineMetrics.total, alignment: .topLeading)
+        .frame(width: width, height: TimelineMetrics.total + shift, alignment: .topLeading)
     }
 
     private var scrubGesture: some Gesture {
@@ -212,6 +224,41 @@ private struct TimelineTracks: View {
             ForEach(model.edit.zooms) { zoom in
                 ZoomBlock(model: model, zoom: zoom, pps: pps)
                     .offset(x: CGFloat(zoom.start) * pps)
+            }
+        }
+    }
+}
+
+/// The chapters from the AI notes, laid along the top of the timeline. Each
+/// one spans from where its topic starts to where the next begins; click to
+/// jump there.
+private struct ChapterStrip: View {
+    @ObservedObject var model: EditorModel
+    let pps: CGFloat
+
+    var body: some View {
+        let chapters = model.chapters
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                let end = index + 1 < chapters.count ? chapters[index + 1].start : model.duration
+                let active = model.activeChapterID == chapter.id
+                Button {
+                    model.seek(toSource: chapter.start + 0.02)
+                } label: {
+                    Text(chapter.title)
+                        .font(.system(size: 10, weight: active ? .semibold : .regular))
+                        .foregroundStyle(active ? Color.white : Theme.subtext)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 5)
+                        .frame(width: max(3, CGFloat(end - chapter.start) * pps - 2), height: TimelineMetrics.chapters - 4, alignment: .leading)
+                        .background(Theme.accent.opacity(active ? 0.5 : 0.2), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(NotesFormat.stamp(chapter.start)) \(chapter.title)")
+                .accessibilityLabel("Chapter: \(chapter.title)")
+                .offset(x: CGFloat(chapter.start) * pps)
             }
         }
     }

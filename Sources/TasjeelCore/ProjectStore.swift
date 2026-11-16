@@ -32,12 +32,14 @@ public struct LibraryEntry: Identifiable, Equatable, Sendable {
 ///         camera.mov     webcam, when one was recorded
 ///         thumb.jpg
 ///         transcript.json   the transcript, once one has been created
+///         notes.json        AI notes and chapters, once created
 public final class ProjectStore: @unchecked Sendable {
     public static let projectName = "project.json"
     public static let screenName = "screen.mov"
     public static let cameraName = "camera.mov"
     public static let thumbnailName = "thumb.jpg"
     public static let transcriptName = "transcript.json"
+    public static let notesName = "notes.json"
 
     public let root: URL
 
@@ -109,6 +111,26 @@ public final class ProjectStore: @unchecked Sendable {
 
     public func deleteTranscript(in directory: URL) {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.transcriptName))
+    }
+
+    // MARK: - Notes
+
+    public func loadNotes(in directory: URL) -> MeetingNotes? {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(Self.notesName)) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(MeetingNotes.self, from: data)
+    }
+
+    public func saveNotes(_ notes: MeetingNotes, in directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(notes).write(to: directory.appendingPathComponent(Self.notesName), options: .atomic)
+    }
+
+    public func deleteNotes(in directory: URL) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.notesName))
     }
 
     /// Adds an existing video file to the library so it can be edited like a

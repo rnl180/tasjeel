@@ -42,6 +42,14 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - Save it as a text file or as `.srt` subtitles; both follow your cuts
 - Over 50 languages, Arabic among them. macOS downloads a language's model the first time you use it
 
+**AI notes** (optional)
+
+- One button turns the transcript into a title, a summary, key points, decisions, action items and chapters
+- Chapters appear along the top of the timeline; click one to jump there. Copy them as a `0:00 Title` list for a video description
+- You choose what does the writing: the model built into macOS, a model you download into [Ollama](https://ollama.com), or Claude with your own Anthropic API key
+- Private by default: the first two run on your Mac, and "Automatic" never uses the cloud. Claude is used only if you pick it and add a key, and then only the transcript text is sent, never audio or video
+- Copy the notes or save them as Markdown; chapter times follow your cuts
+
 **Export**
 
 - MP4 in H.264 or HEVC, at the recording's own resolution by default (up to 4K) or scaled down to 1440p, 1080p or 720p, at 30 or 60 fps
@@ -105,6 +113,7 @@ Everything is in `~/Movies/Tasjeel`, one folder per recording:
     camera.mov     webcam (when one was recorded)
     thumb.jpg
     transcript.json   the transcript, once you create one
+    notes.json        AI notes and chapters, once you create them
 ```
 
 The `.mov` files are ordinary QuickTime movies you can open in any player. Editing never changes them; the edit is only a description in `project.json`. Deleting a recording in the app moves its folder to the Trash.
@@ -130,6 +139,9 @@ A Swift package with two targets and no third-party dependencies:
 | `Transcriber.swift` | Runs each audio track through macOS's on-device speech models |
 | `Transcript.swift` | Transcript lines: splitting into readable lines, echo removal, text and SRT export |
 | `CaptionRenderer.swift` | Draws a caption line, including right-to-left text |
+| `NotesGenerator.swift` | Writes notes from a transcript with any model: the prompt, long meetings in parts, reading the answer |
+| `AIEngines.swift` | The three models (Apple, Ollama, Claude) and the rule for choosing between them |
+| `MeetingNotes.swift` | Notes and chapters, re-timing chapters after cuts, Markdown export |
 
 ### Development
 
@@ -145,6 +157,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `TASJEEL_LIBRARY=/some/folder` makes the app use that folder instead of `~/Movies/Tasjeel`.
 - `Tasjeel --selftest-record 3` records the main display for three seconds with no UI and prints what was written.
 - `Tasjeel --transcribe <recording folder> --language en-US` transcribes a recording and prints the lines.
+- `Tasjeel --notes <recording folder> --engine ollama` writes AI notes from a saved transcript and prints them. `TASJEEL_OLLAMA_URL` points the app at an Ollama on another address.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
 
@@ -154,9 +167,19 @@ A few aids for working on the app, none of which are needed for normal use:
 - Without headphones, your microphone also hears the call coming out of the speakers. Tasjeel drops microphone lines that repeat what the other side said at the same moment, but headphones give the cleanest You / Others split.
 - Accuracy depends on Apple's models and on the audio. The transcript is not editable yet.
 
+### About AI notes
+
+- **Your API key is never in this repository or in any file.** You paste it into AI settings and it is stored in the macOS Keychain. Remove it there at any time.
+- Claude requests go straight from your Mac to `api.anthropic.com` using `claude-opus-5-5`, and Anthropic bills your key. If a safety check declines a request, the API is asked to retry on the fallback model Anthropic recommends (`fallbacks: "default"`).
+- The model built into macOS needs Apple Intelligence switched on, knows fewer languages (no Arabic at the time of writing) and reads only a few pages at a time, so long meetings are summarised in parts.
+- For Ollama, AI settings offers to download `gemma4:12b` (about 8 GB), which handles many languages. Any model you already have works too.
+- Notes are written from the transcript, so a misheard word can end up in them. Treat them as a draft.
+- The tests cover this with a scripted model and local stand-in servers. No real model runs in the test suite.
+
 ## Not there yet
 
 - Editing the transcript, and cutting the video by deleting text
+- Asking questions about a recording, and letting the AI make the cuts
 - Recording a connected iPhone or iPad
 - GIF export
 - Cursor smoothing and click highlights

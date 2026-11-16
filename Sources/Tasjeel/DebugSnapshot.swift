@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import AVFoundation
 import TasjeelCore
 
@@ -33,6 +34,18 @@ enum DebugSnapshot {
                 await record(seconds: seconds, camera: env["TASJEEL_SNAPSHOT_CAMERA"] != nil, into: directory)
             }
 
+            // TASJEEL_SNAPSHOT_AI=1 also pictures the AI settings sheet.
+            if env["TASJEEL_SNAPSHOT_AI"] != nil {
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+                window.identifier = NSUserInterfaceItemIdentifier("aisettings")
+                window.isReleasedWhenClosed = false
+                window.contentView = NSHostingView(rootView: AISettingsView(ai: AIConfig.shared))
+                window.orderBack(nil)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                write(windowMatching: "aisettings", to: directory.appendingPathComponent("ai-settings.png"))
+                window.close()
+            }
+
             let tabs = (env["TASJEEL_SNAPSHOT_EDITOR"] ?? "").split(separator: ",").map(String.init)
             if !tabs.isEmpty, let entry = AppState.shared.items.first {
                 AppState.shared.open(entry)
@@ -50,6 +63,25 @@ enum DebugSnapshot {
                         waited += 0.1
                     }
                     print("transcribe: lines=\(model.transcript?.segments.count ?? -1) speakers=\(model.transcript?.hasSpeakers ?? false) error=\(model.transcriptError ?? "none") saved=\(FileManager.default.fileExists(atPath: model.directory.appendingPathComponent(ProjectStore.transcriptName).path))")
+                }
+                // TASJEEL_SNAPSHOT_NOTES=1 writes the notes again through
+                // the same path as the Create notes button.
+                if env["TASJEEL_SNAPSHOT_NOTES"] != nil {
+                    await AIConfig.shared.refresh()
+                    if model.notes != nil { model.discardNotes() }
+                    if let transcript = model.transcript {
+                        do {
+                            model.createNotes(with: try AIConfig.shared.model(for: transcript.language))
+                        } catch {
+                            print("notes: no engine (\(error.localizedDescription))")
+                        }
+                    }
+                    var waited = 0.0
+                    while model.notesJob != nil, waited < 300 {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        waited += 0.1
+                    }
+                    print("notes: title=\(model.recording.title) engine=\(model.notes?.engine ?? "none") chapters=\(model.chapters.count) actions=\(model.notes?.actionItems.count ?? -1) error=\(model.notesError ?? "none") saved=\(FileManager.default.fileExists(atPath: model.directory.appendingPathComponent(ProjectStore.notesName).path))")
                 }
                 for tab in tabs {
                     model.tab = EditorModel.Tab(rawValue: tab.capitalized) ?? .look

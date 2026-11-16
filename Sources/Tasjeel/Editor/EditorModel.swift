@@ -669,6 +669,44 @@ final class EditorModel: ObservableObject {
         exportTask?.cancel()
     }
 
+    /// Writes the edited video and its captions, chapters and notes into a
+    /// Remotion project at `directory`, for restyling with code or AI.
+    func exportRemotion(to directory: URL, settings: ExportSettings) {
+        guard let media, exportProgress == nil else { return }
+        pause()
+        exportProgress = 0
+        exportError = nil
+        exportedURL = nil
+        let edit = edit
+        let recording = recording
+        let transcript = transcript
+        let notes = notes
+        exportTask = Task {
+            do {
+                try RemotionProject.prepare(directory)
+                let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: settings.longSide)
+                // No captions burned in: Remotion draws its own from the data.
+                let built = try CompositionBuilder.build(media: media, recording: recording, edit: edit,
+                                                         renderSize: size, fps: Int32(settings.fps), captions: [])
+                try await Exporter.export(built, to: RemotionProject.videoURL(in: directory), codec: .h264) { [weak self] progress in
+                    Task { @MainActor in
+                        if self?.exportProgress != nil { self?.exportProgress = progress }
+                    }
+                }
+                let data = try RemotionProject.data(title: recording.title, size: size, fps: settings.fps,
+                                                    duration: built.composition.duration.seconds, timeMap: built.timeMap,
+                                                    transcript: transcript, notes: notes)
+                try RemotionProject.write(to: directory, title: recording.title, data: data)
+                exportedURL = directory
+            } catch is CancellationError {
+                // Cancelled by the user; nothing to report.
+            } catch {
+                exportError = error.localizedDescription
+            }
+            exportProgress = nil
+        }
+    }
+
     /// The composed frame at the playhead, exactly as preview and export draw it.
     func renderedFrame() async -> CGImage? {
         guard let built else { return nil }

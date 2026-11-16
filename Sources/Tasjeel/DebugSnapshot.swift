@@ -83,6 +83,17 @@ enum DebugSnapshot {
                     }
                     print("notes: title=\(model.recording.title) engine=\(model.notes?.engine ?? "none") chapters=\(model.chapters.count) actions=\(model.notes?.actionItems.count ?? -1) error=\(model.notesError ?? "none") saved=\(FileManager.default.fileExists(atPath: model.directory.appendingPathComponent(ProjectStore.notesName).path))")
                 }
+                // TASJEEL_SNAPSHOT_REMOTION=<folder> exports a Remotion project
+                // through the same path as the Remotion project… button.
+                if let folder = env["TASJEEL_SNAPSHOT_REMOTION"] {
+                    model.exportRemotion(to: URL(fileURLWithPath: folder, isDirectory: true), settings: ExportSettings())
+                    var waited = 0.0
+                    while model.exportProgress != nil, waited < 300 {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        waited += 0.1
+                    }
+                    print("remotion: saved=\(model.exportedURL?.lastPathComponent ?? "none") error=\(model.exportError ?? "none")")
+                }
                 for tab in tabs {
                     model.tab = EditorModel.Tab(rawValue: tab.capitalized) ?? .look
                     if tab == "zoom", let zoom = model.edit.zooms.first { model.selection = .zoom(zoom.id) }

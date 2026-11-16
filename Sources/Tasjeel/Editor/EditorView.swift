@@ -209,9 +209,38 @@ private struct ExportPanel: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
             }
+
+            Rectangle().fill(Theme.stroke).frame(height: 1)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Polish it with AI").font(.system(size: 13, weight: .semibold))
+                Text("Save the video as a Remotion project: a folder of code with animated captions, chapter cards and a title, which an AI coding agent such as Claude Code can restyle for you. Needs Node.js.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Remotion project…") {
+                    isPresented = false
+                    chooseRemotionFolder()
+                }
+                .buttonStyle(QuietButtonStyle())
+            }
         }
         .padding(18)
         .frame(width: 340)
+    }
+
+    private func chooseRemotionFolder() {
+        let panel = NSSavePanel()
+        panel.title = "Save Remotion Project"
+        panel.prompt = "Save"
+        panel.nameFieldLabel = "Folder name:"
+        panel.nameFieldStringValue = model.recording.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".") + " Remotion"
+        panel.canCreateDirectories = true
+        let settings = settings
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            model.exportRemotion(to: url, settings: settings)
+        }
     }
 
     private func row(_ title: String, @ViewBuilder control: () -> some View) -> some View {
@@ -276,8 +305,14 @@ private struct ExportToast: View {
             if let url = model.exportedURL {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.good)
-                    Text("Saved \(url.lastPathComponent)").lineLimit(1).truncationMode(.middle)
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(QuietButtonStyle())
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                        // A Remotion project: the next step is inside the folder.
+                        Text("Saved the Remotion project. Double-click Start in its folder.").lineLimit(1).truncationMode(.middle)
+                        Button("Open Folder") { NSWorkspace.shared.open(url) }.buttonStyle(QuietButtonStyle())
+                    } else {
+                        Text("Saved \(url.lastPathComponent)").lineLimit(1).truncationMode(.middle)
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.buttonStyle(QuietButtonStyle())
+                    }
                     IconButton(symbol: "xmark", help: "Dismiss", size: 24) { model.exportedURL = nil }
                 }
                 .modifier(ToastStyle())

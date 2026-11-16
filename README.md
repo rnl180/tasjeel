@@ -50,6 +50,14 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - Private by default: the first two run on your Mac, and "Automatic" never uses the cloud. Claude is used only if you pick it and add a key, and then only the transcript text is sent, never audio or video
 - Copy the notes or save them as Markdown; chapter times follow your cuts
 
+**Polish with AI: Remotion export** (optional, needs Node.js)
+
+- Saves the finished video as a [Remotion](https://www.remotion.dev) project: a folder of code that plays it with animated, word-highlighted captions, chapter cards, a title card and a progress bar
+- Open that folder in Claude Code or another AI coding agent and describe the look you want. The project carries a guide for agents, and its **Start** script installs Remotion's official agent skills
+- Double-click **Start** to preview and **Render** to produce the video. No terminal needed
+- Exporting again refreshes the video and its data and keeps your changes to the code
+- Works right to left for Arabic
+
 **Export**
 
 - MP4 in H.264 or HEVC, at the recording's own resolution by default (up to 4K) or scaled down to 1440p, 1080p or 720p, at 30 or 60 fps
@@ -142,6 +150,8 @@ A Swift package with two targets and no third-party dependencies:
 | `NotesGenerator.swift` | Writes notes from a transcript with any model: the prompt, long meetings in parts, reading the answer |
 | `AIEngines.swift` | The three models (Apple, Ollama, Claude) and the rule for choosing between them |
 | `MeetingNotes.swift` | Notes and chapters, re-timing chapters after cuts, Markdown export |
+| `RemotionProject.swift` | Writes a recording out as a Remotion project |
+| `RemotionTemplate.swift` | The project's files, generated from `Templates/remotion` |
 
 ### Development
 
@@ -158,6 +168,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `Tasjeel --selftest-record 3` records the main display for three seconds with no UI and prints what was written.
 - `Tasjeel --transcribe <recording folder> --language en-US` transcribes a recording and prints the lines.
 - `Tasjeel --notes <recording folder> --engine ollama` writes AI notes from a saved transcript and prints them. `TASJEEL_OLLAMA_URL` points the app at an Ollama on another address.
+- `Tasjeel --remotion <recording folder> --out <project folder>` exports a Remotion project.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
 
@@ -166,6 +177,14 @@ A few aids for working on the app, none of which are needed for normal use:
 - Two speech engines ship with macOS 26. Tasjeel uses the newer long-form one where it knows the language (30 locales: English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese) and the dictation engine for the rest (Arabic, Turkish, Hindi, Russian and others). The dictation engine does not add punctuation in every language.
 - Without headphones, your microphone also hears the call coming out of the speakers. Tasjeel drops microphone lines that repeat what the other side said at the same moment, but headphones give the cleanest You / Others split.
 - Accuracy depends on Apple's models and on the audio. The transcript is not editable yet.
+
+### About the Remotion export
+
+- The template lives in `Templates/remotion` as ordinary files, so it can be opened and run with Remotion. After changing it, run `scripts/embed-remotion-template.py`, which copies it into `RemotionTemplate.swift`; a test fails if the two differ.
+- To check a template change for real: `Tasjeel --remotion <recording> --out /tmp/project`, then in that folder `npm install`, `npm run typecheck` and `npm run render`.
+- The project is pinned to one Remotion version (all Remotion packages must match). `npx remotion upgrade` moves it forward.
+- Tasjeel hands Remotion an H.264 MP4 with the cuts, zooms, wallpaper and camera already applied, because the video component Remotion recommends does not play HEVC. Captions are not burned in; Remotion draws them from `src/recording.json`.
+- Remotion is free for individuals and small teams; larger companies need a licence from Remotion.
 
 ### About AI notes
 
@@ -184,6 +203,10 @@ A few aids for working on the app, none of which are needed for normal use:
 - GIF export
 - Cursor smoothing and click highlights
 - Recording only a selected region of the screen
+
+## Plans
+
+- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. A proposal; nothing is built yet.
 
 ## License
 

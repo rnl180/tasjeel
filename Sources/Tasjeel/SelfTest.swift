@@ -181,6 +181,55 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --remotion <recording folder> --out <project folder> [--size 1920] [--fps 30]`
+    ///
+    /// Exports a recording as a Remotion project, as the editor's
+    /// "Remotion project…" button does.
+    static func remotion() {
+        let args = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let path = value("--remotion"), let out = value("--out") else {
+            print("FAIL usage: --remotion <recording folder> --out <project folder>")
+            exit(1)
+        }
+        Task {
+            do {
+                let directory = URL(fileURLWithPath: path, isDirectory: true)
+                let store = ProjectStore(root: directory.deletingLastPathComponent())
+                guard let entry = store.loadAll().first(where: { $0.directory.standardizedFileURL == directory.standardizedFileURL }) else {
+                    print("FAIL no recording in that folder")
+                    exit(1)
+                }
+                let recording = entry.recording
+                let project = URL(fileURLWithPath: out, isDirectory: true)
+                let longSide = value("--size").flatMap { Int($0) } ?? 0
+                let fps = value("--fps").flatMap { Int($0) } ?? 30
+                try RemotionProject.prepare(project)
+                let media = try await CompositionBuilder.load(recording: recording, directory: directory)
+                let size = CompositionBuilder.canvasSize(aspect: recording.edit.aspect, source: media.screenSize,
+                                                         longSide: longSide == 0 ? nil : longSide)
+                let built = try CompositionBuilder.build(media: media, recording: recording, edit: recording.edit,
+                                                         renderSize: size, fps: Int32(fps), captions: [])
+                try await Exporter.export(built, to: RemotionProject.videoURL(in: project), codec: .h264) { _ in }
+                let transcript = store.loadTranscript(in: directory)
+                let notes = store.loadNotes(in: directory)
+                let data = try RemotionProject.data(title: recording.title, size: size, fps: fps,
+                                                    duration: built.composition.duration.seconds, timeMap: built.timeMap,
+                                                    transcript: transcript, notes: notes)
+                let fresh = try RemotionProject.write(to: project, title: recording.title, data: data)
+                print("OK \(fresh ? "created" : "updated") size=\(Int(size.width))x\(Int(size.height)) captions=\(transcript?.segments.count ?? 0) chapters=\(notes?.chapters.count ?? 0) folder=\(project.path)")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

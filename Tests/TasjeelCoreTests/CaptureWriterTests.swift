@@ -64,7 +64,10 @@ final class CaptureWriterTests: XCTestCase {
             let asbd = try XCTUnwrap(descriptions.first.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee })
             rates.append(asbd.mSampleRate)
             let length = try await track.load(.timeRange).duration.seconds
-            XCTAssertEqual(length, recorded, accuracy: 0.2)
+            // The sound fed while recording: 36 ticks of a thirtieth of a
+            // second. Not compared with the clock, because on a busy Mac the
+            // sleeps between ticks run long while the sound stays the same.
+            XCTAssertEqual(length, 1.2, accuracy: 0.2, "the sound fed during the pause is not in the file")
         }
         XCTAssertEqual(rates, [48000, 24000], "microphone keeps its own sample rate")
 

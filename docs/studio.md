@@ -11,9 +11,13 @@ Videos are kept in **projects**: one for each product, app or business you make 
 - **Its memory**: what the project is, who it is for, how it talks, what it does, which facts and customer quotes are true, its links, logo and colours, and, for an app, where it runs and how to get around it. Press **Project Memory** to read or change it. You fill it in once; after that no video starts by explaining the product again.
 - **Its files**: the logo, screenshots and recordings you add are kept with the project, not with one video.
 
+**Start from the website.** At the top of the Project Memory sheet, type the project's web address and press **Fill from Website**. Tasjeel reads that page and up to three it links to (what it does, what it costs, who is behind it), and the AI model drafts whatever is still empty: the name, what it is, who it is for, how it talks, what it does, and figures and customer quotes that appear on the pages. The site's theme colour becomes the accent colour and its home-screen icon is added to the project as the logo. What you already wrote is never replaced, and nothing is saved until you press **Save**, so read the draft first: it is the site's wording, and the "true facts" are the site's own claims.
+
+This needs Claude or Ollama, like the chat. With Claude, the words of those pages are sent to Anthropic. Sites that draw their text only inside the browser give Tasjeel nothing to read, and it says so. Only `https` sites are read.
+
 The memory also grows by itself. When you tell the chat something that will still be true for the next video ("our customers are clinic owners", "never say AI"), the model asks Tasjeel to remember it. The chat shows exactly what was added, and you can delete any of it under **Project Memory › Learned along the way**. What you say in a chat wins over the memory where they differ.
 
-Switch projects and videos with the two menus at the top left. **New Project…** starts one.
+Switch projects and videos with the two menus at the top left. **New Project…** starts one; its folder takes the project's name once you give it one.
 
 ### PROJECT.md: the brief for AI agents
 
@@ -101,5 +105,6 @@ Videos made with the first version of the Studio, which had no projects, each be
 ## Not yet
 
 - Voiceover, music and publishing: the next phases of the [plan](plans/marketing-video-studio.md). Today's videos are silent unless a recording's own sound is kept.
-- Filling a new project's memory from its website. Today you type it, or tell the chat.
+- Reading a site that needs a browser to show its words, or one behind a sign-in.
+- Fonts and writing samples in the memory.
 - Moving around an app by itself. Tasjeel photographs the window it is shown; it does not click through your app.

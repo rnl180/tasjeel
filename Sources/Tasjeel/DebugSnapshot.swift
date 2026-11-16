@@ -104,11 +104,19 @@ enum DebugSnapshot {
                         let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 680), styleMask: [.titled], backing: .buffered, defer: false)
                         sheet.identifier = NSUserInterfaceItemIdentifier("projectmemory")
                         sheet.isReleasedWhenClosed = false
-                        sheet.contentView = NSHostingView(rootView: ProjectMemoryView(model: studio))
+                        // TASJEEL_SNAPSHOT_STUDIO_SITE=<address> presses Fill from
+                        // Website with that address first.
+                        let site = env["TASJEEL_SNAPSHOT_STUDIO_SITE"]
+                        sheet.contentView = NSHostingView(rootView: ProjectMemoryView(model: studio, startingFrom: site))
                         sheet.orderBack(nil)
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        try? await Task.sleep(nanoseconds: site == nil ? 1_500_000_000 : 6_000_000_000)
                         write(windowMatching: "projectmemory", to: directory.appendingPathComponent("project-memory.png"))
                         sheet.close()
+                        // The same draft, saved as the Save button would.
+                        if let site, let draft = try? await studio.draftMemory(from: site, current: studio.memory) {
+                            studio.save(draft.memory)
+                            print("studio: project=\(studio.project.folderName) name=\(studio.memory.name) video=\(studio.workspace.name) videoExists=\(FileManager.default.fileExists(atPath: studio.workspace.chatURL.path)) logo=\(studio.memory.logo)")
+                        }
                     }
                 }
             }

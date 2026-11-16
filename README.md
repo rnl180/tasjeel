@@ -62,6 +62,7 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 
 - Say what the video is for, add screenshots, a logo or recordings, and an AI model writes the video scene by scene. Ask for changes until it is right
 - **Project memory**: each product or app you make videos about is a project that remembers what it is, who it is for, how it talks, its true facts, logo and colours. Every video starts from that, and the chat adds what it learns
+- **Start from the website**: give a project's web address and the memory is drafted from what the site says, for you to correct
 - **PROJECT.md**: the memory is also written out as a brief you can hand to any AI agent, with the commands that let the agent take screenshots of your app, add to the memory and make videos
 - **Screenshots of your app**: take a picture of any open window (a browser, the iPhone simulator, a Mac app) straight into the project, from the Studio or from an AI agent's terminal
 - Watch it inside the app in wide, square and tall; every earlier version can be brought back
@@ -174,6 +175,7 @@ A Swift package with two targets and no third-party dependencies:
 | `Storyboard.swift` | Checks a storyboard and fills in its defaults |
 | `StudioProject.swift` | Builds a video project from a storyboard, trimming clips to what each scene uses |
 | `ProjectMemory.swift` | A project's memory and shared files, and the PROJECT.md brief written from them |
+| `MemoryDrafter.swift` | Reads a project's website and has a model draft the empty parts of its memory |
 | `StudioWorkspace.swift` | One Studio video on disk: its chat, and the small pictures shown to a model |
 | `StoryboardWriter.swift` | Turns a chat into a checked storyboard: the instructions, reading the answer, sending faults back |
 | `StudioRenderer.swift` | Finds Node.js, keeps one shared copy of Remotion, and renders a size |
@@ -196,7 +198,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `Tasjeel --notes <recording folder> --engine ollama` writes AI notes from a saved transcript and prints them. `TASJEEL_OLLAMA_URL` points the app at an Ollama on another address.
 - `Tasjeel --remotion <recording folder> --out <project folder>` exports a Remotion project.
 - `Tasjeel --storyboard Examples/studio/storyboard.json --out <project folder>` builds a video project from a storyboard.
-- `Tasjeel --project <project folder> --windows --screenshot "Safari" --remember "A fact" --brief` is what an AI agent uses on a Studio project: list open windows, take a screenshot into the project, add to its memory, print its brief.
+- `Tasjeel --project <project folder> --windows --screenshot "Safari" --remember "A fact" --brief` is what an AI agent uses on a Studio project: list open windows, take a screenshot into the project, add to its memory, print its brief. `--from-site example.com --engine ollama` drafts the memory from a website.
 - `Tasjeel --studio <video folder> --add shot.png --say "A launch video for…" --engine ollama --render wide` runs one turn of the Studio: adds material, asks the model, saves the storyboard, renders a size. With `--engine claude` the key is read from `ANTHROPIC_API_KEY`. `TASJEEL_STUDIO=/some/folder` moves the Studio's projects there.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).

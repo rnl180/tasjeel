@@ -258,7 +258,7 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
-    /// `Tasjeel --project <project folder> [--brief] [--remember <fact>]... [--add <file>]... [--windows] [--screenshot <window> [--name <name>]]`
+    /// `Tasjeel --project <project folder> [--brief] [--remember <fact>]... [--add <file>]... [--from-site <address>] [--windows] [--screenshot <window> [--name <name>]]`
     ///
     /// What an AI agent uses to work on a project from a terminal: read its
     /// brief, add to its memory, add files, and take a screenshot of an open
@@ -294,6 +294,37 @@ enum SelfTest {
                 for file in values("--add") {
                     let asset = try await project.addAsset(from: URL(fileURLWithPath: (file as NSString).expandingTildeInPath))
                     print("added \(asset.file) \(asset.width)x\(asset.height)\(asset.seconds.map { " \($0)s" } ?? "")")
+                }
+
+                // --from-site <address> [--engine claude|ollama] [--model <name>]
+                // drafts the empty parts of the memory from the project's website.
+                if let address = values("--from-site").first {
+                    let model: any TextModel
+                    if values("--engine").first == "ollama" {
+                        let client = OllamaClient()
+                        let installed = try await client.models()
+                        guard let name = values("--model").first ?? installed.first else {
+                            print("FAIL Ollama has no models")
+                            exit(1)
+                        }
+                        model = OllamaModel(name: name, client: client)
+                    } else {
+                        guard let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !key.isEmpty else {
+                            print("FAIL set ANTHROPIC_API_KEY to use Claude, or add --engine ollama")
+                            exit(1)
+                        }
+                        model = ClaudeModel(apiKey: key)
+                    }
+                    let pages = try await MemoryDrafter.fetch(address)
+                    print("read \(pages.count) page\(pages.count == 1 ? "" : "s"): \(pages.map { $0.url.path.isEmpty ? "/" : $0.url.path }.joined(separator: " ")) (\(pages.reduce(0) { $0 + $1.text.count }) characters)")
+                    var draft = try await MemoryDrafter.draft(from: pages, current: project.loadMemory(), model: model)
+                    if draft.memory.logo.isEmpty, let icon = pages.first?.icon,
+                       let logo = await project.addPicture(downloadedFrom: icon, named: "logo", note: "The icon from \(icon.host ?? "the website").") {
+                        draft.memory.logo = logo.file
+                        draft.filled.append("Logo")
+                    }
+                    try project.save(draft.memory)
+                    print("filled: \(draft.filled.isEmpty ? "nothing" : draft.filled.joined(separator: ", "))")
                 }
 
                 if args.contains("--windows") || !values("--screenshot").isEmpty {

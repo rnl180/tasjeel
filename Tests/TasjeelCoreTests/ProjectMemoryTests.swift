@@ -56,6 +56,32 @@ final class ProjectMemoryTests: XCTestCase {
         XCTAssertEqual(try ProjectFolder.create(named: "A/B: Test", in: root).folderName, "A-B- Test")
     }
 
+    func testAProjectsFolderTakesItsNameOnceItHasOne() throws {
+        let project = try ProjectFolder.create(named: "New Project", in: root)
+        _ = try project.newVideo(named: "Launch")
+        XCTAssertNil(project.renamedForItsName(), "still called New Project")
+
+        var memory = project.loadMemory()
+        memory.name = "Orbit"
+        try project.save(memory)
+        let moved = try XCTUnwrap(project.renamedForItsName())
+        XCTAssertEqual(moved.folderName, "Orbit")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: project.directory.path))
+        XCTAssertEqual(moved.loadMemory().name, "Orbit")
+        XCTAssertEqual(moved.videos().map(\.name), ["Launch"])
+        XCTAssertTrue(try String(contentsOf: moved.briefURL, encoding: .utf8).contains("/Orbit`"), "the brief points at the new folder")
+        XCTAssertNil(moved.renamedForItsName(), "a folder with a real name is never moved again")
+
+        // A second unnamed project, numbered by the Finder's rule, moves too.
+        _ = try ProjectFolder.create(named: "New Project", in: root)
+        let second = try ProjectFolder.create(named: "New Project", in: root)
+        XCTAssertEqual(second.folderName, "New Project 2")
+        var other = second.loadMemory()
+        other.name = "Orbit"
+        try second.save(other)
+        XCTAssertEqual(second.renamedForItsName()?.folderName, "Orbit 2", "never onto another project")
+    }
+
     func testOlderAndPartialMemoryFilesStillOpen() throws {
         let project = ProjectFolder(directory: root.appendingPathComponent("Old"))
         try FileManager.default.createDirectory(at: project.directory, withIntermediateDirectories: true)

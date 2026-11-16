@@ -196,6 +196,15 @@ final class StudioModel: ObservableObject {
         if changed.name.isEmpty { changed.name = memory.name }
         memory = changed
         try? project.save(changed)
+        // A project made as "New Project" moves to a folder with its name,
+        // unless something is running in the old one.
+        if writing == nil, render == nil, !addingMaterials, let moved = project.renamedForItsName() {
+            let video = workspace.name
+            project = moved
+            workspace = StudioWorkspace(directory: moved.videosURL.appendingPathComponent(video, isDirectory: true))
+            loadedVideo = nil
+            refreshVideo()
+        }
         reloadLists()
     }
 
@@ -203,6 +212,22 @@ final class StudioModel: ObservableObject {
         var changed = memory
         changed.learned.removeAll { $0.id == learned.id }
         save(changed)
+    }
+
+    /// Reads the project's website and drafts the empty parts of `current`.
+    /// Nothing is saved: the sheet shows the draft for the user to correct.
+    /// The site's icon, when it has one, is added to the project as a logo.
+    func draftMemory(from address: String, current: ProjectMemory) async throws -> MemoryDrafter.Draft {
+        let writer = try AIEngines.model(for: engine) { SecretStore.readKey() }
+        let pages = try await MemoryDrafter.fetch(address)
+        var draft = try await MemoryDrafter.draft(from: pages, current: current, model: writer)
+        if draft.memory.logo.isEmpty, let icon = pages.first?.icon,
+           let logo = await project.addPicture(downloadedFrom: icon, named: "logo", note: "The icon from \(icon.host ?? "the website").") {
+            materials = project.loadAssets()
+            draft.memory.logo = logo.file
+            draft.filled.append("Logo")
+        }
+        return draft
     }
 
     /// The brief, brought up to date, as text.

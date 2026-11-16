@@ -6,6 +6,8 @@ import TasjeelCore
 /// brief made from it for AI agents.
 struct ProjectMemoryView: View {
     @ObservedObject var model: StudioModel
+    /// A website to read as soon as the sheet opens.
+    var startingFrom: String?
     @ObservedObject private var app = AppState.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -14,6 +16,11 @@ struct ProjectMemoryView: View {
     @State private var facts = ""
     @State private var links = ""
     @State private var copied = false
+    @State private var website = ""
+    @State private var reading = false
+    @State private var readNote: String?
+    @State private var readProblem: String?
+    @State private var readTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,6 +37,7 @@ struct ProjectMemoryView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    fromWebsite
                     basics
                     if draft.kind == .app { appSection }
                     wording
@@ -55,7 +63,10 @@ struct ProjectMemoryView: View {
                 }
                 .buttonStyle(QuietButtonStyle())
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") {
+                    readTask?.cancel()
+                    dismiss()
+                }
                     .buttonStyle(QuietButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
@@ -76,6 +87,85 @@ struct ProjectMemoryView: View {
             features = draft.features.joined(separator: "\n")
             facts = draft.facts.joined(separator: "\n")
             links = draft.links.joined(separator: "\n")
+            if website.isEmpty { website = draft.links.first ?? "" }
+            if let startingFrom {
+                website = startingFrom
+                readWebsite()
+            }
+        }
+    }
+
+    // MARK: - From the website
+
+    private var fromWebsite: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionTitle("Start from the website")
+            HStack(spacing: 8) {
+                input("example.com", text: $website)
+                    .onSubmit(readWebsite)
+                    .disabled(reading)
+                if reading {
+                    ProgressView().controlSize(.small)
+                    Button("Stop") {
+                        readTask?.cancel()
+                        reading = false
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                } else {
+                    Button("Fill from Website", action: readWebsite)
+                        .buttonStyle(QuietButtonStyle())
+                        .disabled(website.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            if let readProblem {
+                Text(readProblem).font(.system(size: 11.5)).foregroundStyle(Theme.warn).fixedSize(horizontal: false, vertical: true)
+            } else if let readNote {
+                Text(readNote).font(.system(size: 11.5)).foregroundStyle(Theme.good).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(websiteHint).font(.system(size: 11)).foregroundStyle(Theme.faint).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .cardSurface(radius: 10)
+    }
+
+    private var websiteHint: String {
+        let base = "Reads the page and up to three it links to, and drafts whatever is still empty below. What you have written is kept."
+        switch model.engine {
+        case .claude: return base + " The pages' words are sent to Anthropic for the draft."
+        case .ollama: return base + " The draft is written on this Mac."
+        default: return base + " Needs Claude or Ollama set up in AI Settings."
+        }
+    }
+
+    private func readWebsite() {
+        let address = website.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty, !reading else { return }
+        // What is typed in the boxes counts as written, so it is kept.
+        var current = draft
+        current.features = lines(features)
+        current.facts = lines(facts)
+        current.links = lines(links)
+        reading = true
+        readNote = nil
+        readProblem = nil
+        readTask = Task {
+            do {
+                let result = try await model.draftMemory(from: address, current: current)
+                guard !Task.isCancelled else { return }
+                draft = result.memory
+                features = draft.features.joined(separator: "\n")
+                facts = draft.facts.joined(separator: "\n")
+                links = draft.links.joined(separator: "\n")
+                readNote = result.filled.isEmpty
+                    ? "Nothing was empty that the site could fill."
+                    : "Filled in: \(result.filled.joined(separator: ", ")). Read it through before you save; it is the site's wording, and the facts are the site's claims."
+            } catch is CancellationError {
+                // Stopped by the user.
+            } catch {
+                if !Task.isCancelled { readProblem = error.localizedDescription }
+            }
+            reading = false
         }
     }
 

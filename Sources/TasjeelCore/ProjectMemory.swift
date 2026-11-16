@@ -208,7 +208,7 @@ public struct ProjectFolder: Equatable, Identifiable, Sendable {
 
     /// A folder in `parent` that does not exist yet, named as asked or with
     /// a number after it.
-    static func freeFolder(named name: String, in parent: URL) -> URL {
+    public static func freeFolder(named name: String, in parent: URL) -> URL {
         // Characters a folder name cannot hold.
         var base = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         base = String(base.prefix(60)).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
@@ -220,6 +220,22 @@ public struct ProjectFolder: Equatable, Identifiable, Sendable {
             n += 1
         }
         return url
+    }
+
+    /// Names a new project has before the user has named it.
+    public static let placeholderNames: Set<String> = ["My Project", "New Project", "Project", "Untitled"]
+
+    /// Once a project made as "New Project" has a real name, its folder
+    /// takes that name too, so it can be found in the Finder. Returns the
+    /// project in its new place, or nil when nothing was moved.
+    public func renamedForItsName() -> ProjectFolder? {
+        let name = loadMemory().name
+        let base = folderName.replacingOccurrences(of: " \\d+$", with: "", options: .regularExpression)
+        guard Self.placeholderNames.contains(base), !Self.placeholderNames.contains(name), !name.isEmpty else { return nil }
+        let moved = ProjectFolder(directory: Self.freeFolder(named: name, in: directory.deletingLastPathComponent()))
+        guard (try? FileManager.default.moveItem(at: directory, to: moved.directory)) != nil else { return nil }
+        try? moved.writeBrief()
+        return moved
     }
 
     // MARK: - Memory
@@ -282,6 +298,24 @@ public struct ProjectFolder: Equatable, Identifiable, Sendable {
         let asset = try await StudioMaterial.importing(source, into: assetsURL, base: directory, named: preferred, note: note)
         try saveAssets(loadAssets() + [asset])
         return asset
+    }
+
+    /// Downloads a picture (a website's icon) into the project's assets.
+    /// Nil when it cannot be fetched or is not a picture Tasjeel can use.
+    /// A picture already downloaded with the same note is used again, so
+    /// asking twice does not add it twice.
+    public func addPicture(downloadedFrom url: URL, named name: String, note: String? = nil, session: URLSession = .shared) async -> StudioMaterial? {
+        if let note, let have = loadAssets().first(where: { $0.note == note }) { return have }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("Mozilla/5.0 (Macintosh) Tasjeel", forHTTPHeaderField: "User-Agent")
+        guard Storyboard.imageTypes.contains(url.pathExtension.lowercased()),
+              let (data, response) = try? await session.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count > 100, data.count < 5_000_000 else { return nil }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("tasjeel-\(UUID().uuidString).\(url.pathExtension.lowercased())")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard (try? data.write(to: temporary)) != nil else { return nil }
+        return try? await addAsset(from: temporary, named: name, note: note)
     }
 
     /// Saves a picture (a screenshot) into the project's assets as a PNG.

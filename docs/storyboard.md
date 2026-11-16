@@ -54,6 +54,8 @@ Only `scenes` is required. File names are relative to the storyboard's folder.
 
 Every scene has a `type` and may have `seconds` (1 to 30). Text that is too long to fit on screen is reported.
 
+Every scene may also have `say`: what a narrator reads aloud during it (up to 400 characters). It is spoken only when the video is made in the [Studio](studio.md) with a voice chosen; the scene is then lengthened to fit, and the words are shown as captions unless the storyboard has `"captions": false` at the top. Built any other way, `say` is ignored and the video is silent.
+
 ### `hook`: the opening line
 
 One big sentence whose words rise in one by one. 3 seconds unless you say otherwise.

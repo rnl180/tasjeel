@@ -1,6 +1,6 @@
 # Plan: Marketing Video Studio
 
-Status: phases 1 and 2 and project memory are built (see [Storyboards](../storyboard.md) and [Studio](../studio.md)). Phases 3 to 5 are proposals. Written 16 November 2026.
+Status: phases 1 and 2, project memory and voiceover are built (see [Storyboards](../storyboard.md) and [Studio](../studio.md)). Phases 3 to 5 are proposals. Written 16 November 2026.
 
 ## What this is
 
@@ -80,7 +80,11 @@ Each phase ends with something usable.
 
 **2b. Project memory. Done.** Not in the first plan; added on request. Videos belong to projects. A project keeps a memory (what it is, audience, voice, features, true facts, brand, and for an app where it runs) that every video starts from and that the chat adds to, shared assets, and a `PROJECT.md` brief for AI agents with commands to take screenshots of the running app, add to the memory and make videos. A new project's memory can be drafted from its website. See [Studio](../studio.md).
 
-**3. Voice and sound.** The Connections page, ElevenLabs voiceover with word-timed captions, the free built-in voice fallback, music from a folder or generated. Done when a video has narration in sync with its captions in English and Arabic.
+**3a. Voiceover. Done.** ElevenLabs with the user's own key: a voice chosen per project, narration written by the model, each line spoken with word timings and shown as captions that follow the voice, a question before anything is charged, and every line kept so it is never paid for twice. Checked in English and Arabic with a stand-in for ElevenLabs; not yet run against the real service. Keys are entered in AI Settings rather than on a separate Connections page.
+
+**3b. Music and a free voice. Not built.** What is left of the proposal below.
+
+**3. Voice and sound (as first proposed).** The Connections page, ElevenLabs voiceover with word-timed captions, the free built-in voice fallback, music from a folder or generated. Done when a video has narration in sync with its captions in English and Arabic.
 
 **4. Publish.** Postiz: pick channels, write a caption per network, schedule, see what was scheduled. Done when a rendered video is scheduled to a real account from inside Tasjeel.
 

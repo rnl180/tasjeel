@@ -21,7 +21,7 @@ struct StudioView: View {
                     .frame(width: 400)
                     .background(Theme.panel)
                 Rectangle().fill(Theme.stroke).frame(width: 1)
-                StudioPreviewPane(model: model)
+                StudioPreviewPane(model: model, showAISettings: { showingAISettings = true })
             }
         }
         .background(Theme.window)
@@ -59,7 +59,28 @@ struct StudioView: View {
         } message: {
             Text("Tasjeel makes the video with Remotion, a free video tool, and needs to download it once: about 1 GB, into your Tasjeel Studio folder. Remotion is free for individuals and small companies; larger companies need a licence from remotion.dev.")
         }
-        .task { await ai.refresh() }
+        .alert("Record the voiceover?", isPresented: Binding(get: { model.voiceAsk != nil }, set: { if !$0 { model.voiceAsk = nil } }), presenting: model.voiceAsk) { _ in
+            Button("Record and Create Video") { model.run(voice: true) }
+            Button("Create Without Voice") { model.run(voice: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: { ask in
+            Text(Self.voiceQuestion(ask))
+        }
+        .task {
+            await ai.refresh()
+            if ai.hasVoiceKey, ai.voices.isEmpty { await ai.loadVoices() }
+        }
+    }
+
+    static func voiceQuestion(_ ask: StudioModel.VoiceAsk) -> String {
+        let lines = ask.lines == 1 ? "1 line" : "\(ask.lines) lines"
+        var text = "\(lines) of narration, \(ask.characters.formatted()) characters, will be sent to ElevenLabs and counted against your plan."
+        if let left = ask.left {
+            text += left >= ask.characters
+                ? " Your plan has \(left.formatted()) characters left."
+                : " Your plan has only \(left.formatted()) characters left, which may not be enough."
+        }
+        return text + " Lines recorded before are not sent again."
     }
 
     private var topBar: some View {
@@ -554,6 +575,8 @@ struct StudioThumbnail: View {
 
 struct StudioPreviewPane: View {
     @ObservedObject var model: StudioModel
+    @ObservedObject private var ai = AIConfig.shared
+    var showAISettings: () -> Void = {}
 
     var body: some View {
         if let outline = model.outline {
@@ -577,7 +600,7 @@ struct StudioPreviewPane: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(outline.title).font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text("\(outline.scenes.count) scene\(outline.scenes.count == 1 ? "" : "s") · \(Format.clock(outline.seconds.rounded()))")
+                Text("\(outline.scenes.count) scene\(outline.scenes.count == 1 ? "" : "s") · \(length(outline))")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.subtext)
             }
@@ -587,6 +610,7 @@ struct StudioPreviewPane: View {
                     .frame(width: CGFloat(outline.formats.count) * 68)
                     .disabled(model.render != nil)
             }
+            voiceMenu
             if model.render != nil {
                 Button("Cancel") { model.cancelRender() }.buttonStyle(QuietButtonStyle())
             } else {
@@ -625,6 +649,69 @@ struct StudioPreviewPane: View {
         .padding(.bottom, 14)
     }
 
+    /// With a voiceover a scene lasts as long as its line takes to say,
+    /// which is only known once it is spoken: until then, an estimate.
+    private func length(_ outline: Storyboard.Outline) -> String {
+        let voiced = model.memory.narrator != nil && ai.hasVoiceKey && outline.scenes.contains { $0.say != nil }
+        guard voiced else { return Format.clock(outline.seconds.rounded()) }
+        let total = outline.scenes.reduce(0.0) { sum, scene in
+            sum + max(scene.seconds, scene.say.map { Narration.leadIn + Narration.estimate($0) + Narration.leadOut } ?? 0)
+        }
+        return "about \(Format.clock(total.rounded()))"
+    }
+
+    /// Which voice reads the video aloud. The choice belongs to the project.
+    private var voiceMenu: some View {
+        Menu {
+            if !ai.hasVoiceKey {
+                Text("A voiceover needs your ElevenLabs API key")
+                Button("Set Up ElevenLabs…", action: showAISettings)
+            } else {
+                Button {
+                    model.setNarrator(nil)
+                } label: {
+                    if model.memory.narrator == nil { Label("No Voiceover", systemImage: "checkmark") } else { Text("No Voiceover") }
+                }
+                Divider()
+                if ai.loadingVoices { Text("Loading your voices…") }
+                if let problem = ai.voicesError { Text(problem) }
+                ForEach(ai.voices) { voice in
+                    Button {
+                        model.setNarrator(voice)
+                    } label: {
+                        let title = voice.detail.isEmpty ? voice.name : "\(voice.name) (\(voice.detail))"
+                        if model.memory.narrator?.id == voice.id { Label(title, systemImage: "checkmark") } else { Text(title) }
+                    }
+                }
+                if !ai.loadingVoices {
+                    Divider()
+                    Button("Reload Voices") { Task { await ai.loadVoices() } }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: model.memory.narrator != nil && ai.hasVoiceKey ? "waveform" : "speaker.slash")
+                    .font(.system(size: 11.5, weight: .medium))
+                Text(ai.hasVoiceKey ? (model.memory.narrator?.name ?? "No Voice") : "No Voice")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 8.5, weight: .bold)).foregroundStyle(Theme.faint)
+            }
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .frame(maxWidth: 170)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.stroke))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(model.render != nil)
+        .help("The voice that reads this project's videos aloud, from your ElevenLabs account")
+        .accessibilityLabel("Voiceover")
+    }
+
     // MARK: Stage
 
     private static let aspects: [String: CGFloat] = ["wide": 16.0 / 9.0, "square": 1, "tall": 9.0 / 16.0]
@@ -656,6 +743,11 @@ struct StudioPreviewPane: View {
                 }
                 .padding(10)
                 .background(Theme.warn.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            } else if let note = model.voiceNote, model.render == nil {
+                Label(note, systemImage: "speaker.slash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if model.videoIsStale, model.render == nil {
                 Label("The storyboard changed after this video was made. Press Update Video to see the changes.", systemImage: "arrow.triangle.2.circlepath")
                     .font(.system(size: 12))
@@ -804,10 +896,15 @@ struct SceneCard: View {
                     .padding(5)
             }
 
-            Text("\(scene.id + 1) · \(scene.label)".uppercased())
-                .font(.system(size: 9.5, weight: .semibold))
-                .kerning(0.5)
-                .foregroundStyle(Theme.faint)
+            HStack(spacing: 4) {
+                Text("\(scene.id + 1) · \(scene.label)".uppercased())
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .kerning(0.5)
+                if scene.say != nil {
+                    Image(systemName: "waveform").font(.system(size: 9, weight: .semibold)).accessibilityLabel("Has narration")
+                }
+            }
+            .foregroundStyle(Theme.faint)
             Text(scene.text)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.text)
@@ -816,7 +913,7 @@ struct SceneCard: View {
                 .frame(width: 168, alignment: .leading)
                 .environment(\.layoutDirection, outline.rightToLeft ? .rightToLeft : .leftToRight)
         }
-        .help(scene.detail.map { "\(scene.text)\n\($0)" } ?? scene.text)
+        .help([scene.text, scene.detail, scene.say.map { "Narration: \($0)" }].compactMap { $0 }.joined(separator: "\n"))
     }
 
     private var seconds: String {

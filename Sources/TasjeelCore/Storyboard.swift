@@ -94,6 +94,8 @@ public enum Storyboard {
         let fps = top.number("fps", range: 1 ... 120) ?? 30
         if ![24, 25, 30, 50, 60].contains(fps) { problems.add("The storyboard: \"fps\" must be 24, 25, 30, 50 or 60.") }
 
+        let captions = top.bool("captions") ?? true
+
         var formats = top.strings("formats", limit: 3) ?? Self.formats
         for format in formats where !Self.formats.contains(format) {
             problems.add("The storyboard: \"\(format)\" is not a size. Use \"wide\", \"square\" or \"tall\".")
@@ -136,6 +138,12 @@ public enum Storyboard {
             fields.place = "Scene \(number) (\(type))"
             let seconds = fields.number("seconds", range: 1 ... 30) ?? defaultSeconds[type] ?? 4
             var scene: [String: Any] = ["type": type, "seconds": seconds]
+            // What the narrator says. The voice, its length and the timing of
+            // its words are filled in when the project is built with a voiceover.
+            scene["say"] = fields.string("say", limit: 400) ?? NSNull()
+            scene["voice"] = NSNull()
+            scene["voiceSeconds"] = 0
+            scene["words"] = [[String: Any]]()
 
             switch type {
             case "hook":
@@ -201,6 +209,8 @@ public enum Storyboard {
             "rightToLeft": Locale.Language(identifier: language).characterDirection == .rightToLeft,
             "fps": Int(fps),
             "formats": formats,
+            "captions": captions,
+            "voiceLeadIn": Narration.leadIn,
             "brand": brand,
             "scenes": scenes,
         ]
@@ -226,6 +236,8 @@ public extension Storyboard {
             /// The picture or clip the scene shows, and where in a clip it starts.
             public var media: URL?
             public var start: Double?
+            /// What the narrator says during it.
+            public var say: String?
         }
 
         public var title: String
@@ -293,7 +305,7 @@ public extension Storyboard {
             }
             if detail?.isEmpty == true { detail = nil }
             return Outline.Scene(id: index, type: type, label: sceneLabels[type] ?? type, text: main, detail: detail,
-                                 seconds: (scene["seconds"] as? NSNumber)?.doubleValue ?? 0, media: media, start: start)
+                                 seconds: (scene["seconds"] as? NSNumber)?.doubleValue ?? 0, media: media, start: start, say: text("say"))
         }
         return Outline(title: board["title"] as? String ?? "Untitled video", language: board["language"] as? String ?? "en",
                        rightToLeft: board["rightToLeft"] as? Bool ?? false, formats: board["formats"] as? [String] ?? formats,
@@ -305,8 +317,8 @@ public extension Storyboard {
     /// A storyboard written out the way a person would: title first, each
     /// scene starting with its type, and the rest in a steady order.
     static func text(for storyboard: [String: Any]) -> String {
-        let order = ["version", "title", "language", "formats", "fps", "brand", "scenes",
-                     "type", "seconds", "kicker", "text", "video", "start", "caption", "sound", "headline", "points", "image",
+        let order = ["version", "title", "language", "formats", "fps", "captions", "brand", "scenes",
+                     "type", "seconds", "say", "kicker", "text", "video", "start", "caption", "sound", "headline", "points", "image",
                      "quote", "name", "role", "items", "value", "prefix", "suffix", "label", "link",
                      "logo", "background", "accent", "font"]
         let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })

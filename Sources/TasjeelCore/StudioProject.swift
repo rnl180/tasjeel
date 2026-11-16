@@ -46,9 +46,14 @@ public enum StudioProject {
     /// File names in the storyboard are relative to `baseDirectory`, or to
     /// the storyboard's own folder when none is given.
     ///
+    /// `narration` is the spoken line of each scene that has one (see
+    /// `Narration`). A scene is lengthened to fit its line. Without it the
+    /// video is built silent, whatever the storyboard's scenes say.
+    ///
     /// Refreshing replaces the storyboard data and the media and leaves the
     /// code alone, so changes made to how scenes look survive a rebuild.
     public static func build(storyboard url: URL, in directory: URL, baseDirectory: URL? = nil,
+                             narration: [Int: Narration.Line] = [:],
                              progress: @escaping @Sendable (Double, String) -> Void = { _, _ in }) async throws -> Summary {
         let data: Data
         do {
@@ -62,7 +67,18 @@ public enum StudioProject {
 
         // Clips are checked before anything is written, so a storyboard with
         // a problem leaves no half-built folder behind.
-        let problems = await clipProblems(in: plan)
+        // A scene lasts at least as long as its narration. This comes before
+        // the clips are checked, because a longer scene needs more clip.
+        var timed = plan.storyboard["scenes"] as? [[String: Any]] ?? []
+        for (index, line) in narration where timed.indices.contains(index) {
+            let needed = ((Narration.leadIn + line.seconds + Narration.leadOut) * 10).rounded(.up) / 10
+            let written = (timed[index]["seconds"] as? NSNumber)?.doubleValue ?? 0
+            timed[index]["seconds"] = max(written, needed)
+            if let clip = plan.clips.firstIndex(where: { $0.scene == index }) { plan.clips[clip].seconds = max(written, needed) }
+        }
+        plan.storyboard["scenes"] = timed
+
+        let problems = await clipProblems(in: plan, narrated: Set(narration.keys))
         guard problems.isEmpty else { throw StoryboardError.invalid(problems) }
         let assets = plan.clips.map { AVURLAsset(url: $0.source) }
 
@@ -84,6 +100,13 @@ public enum StudioProject {
             scenes[clip.scene]["videoWidth"] = Int(size.width)
             scenes[clip.scene]["videoHeight"] = Int(size.height)
         }
+        for (index, line) in narration where scenes.indices.contains(index) {
+            let path = "media/voice-\(index + 1).mp3"
+            try FileManager.default.copyItem(at: line.file, to: directory.appendingPathComponent("public/\(path)"))
+            scenes[index]["voice"] = path
+            scenes[index]["voiceSeconds"] = line.seconds
+            scenes[index]["words"] = line.words.map { ["text": $0.text, "start": $0.start, "end": $0.end] as [String: Any] }
+        }
         plan.storyboard["scenes"] = scenes
 
         progress(0.95, "Writing the project…")
@@ -99,7 +122,10 @@ public enum StudioProject {
 
     /// What is wrong with the clips a storyboard uses: one that cannot be
     /// opened, or a scene that runs past the end of its clip.
-    public static func clipProblems(in plan: Storyboard.Plan) async -> [String] {
+    ///
+    /// `narrated` holds the scenes whose length was set by their narration,
+    /// so the advice fits: there, it is the words that need shortening.
+    public static func clipProblems(in plan: Storyboard.Plan, narrated: Set<Int> = []) async -> [String] {
         var problems: [String] = []
         for clip in plan.clips {
             let asset = AVURLAsset(url: clip.source)
@@ -109,7 +135,10 @@ public enum StudioProject {
                 problems.append("Scene \(number) (screen): \"\(clip.source.lastPathComponent)\" could not be opened as a video.")
                 continue
             }
-            if clip.start + clip.seconds > length + 0.05 {
+            if clip.start + clip.seconds > length + 0.05, narrated.contains(clip.scene) {
+                let room = max(length - clip.start, 0)
+                problems.append("Scene \(number) (screen): its narration takes \(format(clip.seconds)) s, but \"\(clip.source.lastPathComponent)\" has only \(format(room)) s to show\(clip.start > 0 ? " from \(format(clip.start)) s" : ""). Say less in this scene, or start the clip earlier.")
+            } else if clip.start + clip.seconds > length + 0.05 {
                 let from = clip.start > 0 ? " starting at \(format(clip.start)) s" : ""
                 problems.append("Scene \(number) (screen): the scene lasts \(format(clip.seconds)) s\(from), but \"\(clip.source.lastPathComponent)\" is only \(format(length)) s long. Shorten \"seconds\" or lower \"start\".")
             }

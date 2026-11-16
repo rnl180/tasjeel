@@ -15,16 +15,35 @@ export type Brand = {
   font: string | null;
 };
 
-export type HookScene = {
-  type: "hook";
+// One spoken word and when it is heard, in seconds from the start of the voice.
+export type Word = {
+  text: string;
+  start: number;
+  end: number;
+};
+
+// What every scene has, whatever its kind.
+type Timed = {
+  // How long the scene lasts. Already long enough for its narration.
   seconds: number;
+  // What the narrator says, or null.
+  say: string | null;
+  // The narration as sound: a path inside public/, or null when the video
+  // was built without a voiceover.
+  voice: string | null;
+  voiceSeconds: number;
+  // The narration's words with their timing, for captions. Empty without a voice.
+  words: Word[];
+};
+
+export type HookScene = Timed & {
+  type: "hook";
   text: string;
   kicker: string | null;
 };
 
-export type ScreenScene = {
+export type ScreenScene = Timed & {
   type: "screen";
-  seconds: number;
   // Path inside public/. Already trimmed: it starts where the scene starts.
   video: string;
   videoWidth: number;
@@ -33,17 +52,15 @@ export type ScreenScene = {
   sound: boolean;
 };
 
-export type FeatureScene = {
+export type FeatureScene = Timed & {
   type: "feature";
-  seconds: number;
   headline: string;
   points: string[];
   image: string | null;
 };
 
-export type QuoteScene = {
+export type QuoteScene = Timed & {
   type: "quote";
-  seconds: number;
   quote: string;
   name: string | null;
   role: string | null;
@@ -56,16 +73,14 @@ export type NumberItem = {
   label: string;
 };
 
-export type NumbersScene = {
+export type NumbersScene = Timed & {
   type: "numbers";
-  seconds: number;
   headline: string | null;
   items: NumberItem[];
 };
 
-export type CallToActionScene = {
+export type CallToActionScene = Timed & {
   type: "cta";
-  seconds: number;
   text: string;
   link: string | null;
 };
@@ -85,6 +100,10 @@ export type Storyboard = {
   rightToLeft: boolean;
   fps: number;
   formats: Format[];
+  // Whether the narration is also shown as captions.
+  captions: boolean;
+  // Seconds of quiet before a scene's narration starts.
+  voiceLeadIn: number;
   brand: Brand;
   scenes: Scene[];
 };

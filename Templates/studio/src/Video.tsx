@@ -1,5 +1,7 @@
+import { Audio } from "@remotion/media";
 import React from "react";
-import { AbsoluteFill, Img, Series, staticFile, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, Sequence, Series, staticFile, useVideoConfig } from "remotion";
+import { Spoken } from "./components/Spoken";
 import { useLayout } from "./lib/layout";
 import { useExit } from "./lib/motion";
 import { CallToAction } from "./scenes/CallToAction";
@@ -28,6 +30,21 @@ const render = (scene: Scene): React.ReactNode => {
   }
 };
 
+// A scene's narration: the voice, and its words as captions that follow it.
+// It starts a moment into the scene, so a cut is never also a first word.
+const Narration: React.FC<{ scene: Scene }> = ({ scene }) => {
+  const { fps } = useVideoConfig();
+  if (!scene.voice) {
+    return null;
+  }
+  return (
+    <Sequence from={Math.round(storyboard.voiceLeadIn * fps)} layout="none" name="Narration">
+      <Audio src={staticFile(scene.voice)} />
+      {storyboard.captions ? <Spoken words={scene.words} /> : null}
+    </Sequence>
+  );
+};
+
 // Every scene sits in the same frame: padding, text direction, the logo in
 // the corner, and a short fade out so the cut to the next scene is soft.
 const SceneFrame: React.FC<{ scene: Scene; children: React.ReactNode }> = ({ scene, children }) => {
@@ -40,6 +57,7 @@ const SceneFrame: React.FC<{ scene: Scene; children: React.ReactNode }> = ({ sce
       style={{ padding: u * 7, opacity: exit }}
     >
       {children}
+      <Narration scene={scene} />
       {brand.logo && scene.type !== "cta" ? (
         <Img
           src={staticFile(brand.logo)}

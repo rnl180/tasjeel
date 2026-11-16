@@ -365,7 +365,7 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
-    /// `Tasjeel --studio <video folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>]`
+    /// `Tasjeel --studio <video folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>] [--voice <voice id>]`
     ///
     /// One turn of the Studio from a terminal: adds material, sends a message
     /// to the model, saves the storyboard it writes, and optionally renders a
@@ -418,9 +418,12 @@ enum SelfTest {
                         let memory = project.loadMemory()
                         return "The project is called \(memory.name).\n\n" + ProjectBrief.knowledge(memory)
                     }
+                    // With --voice, or a voice chosen for the project, the
+                    // model is asked to write narration too.
+                    let narrator = workspace.project?.loadMemory().narrator?.name ?? (values("--voice").isEmpty ? nil : "the narrator")
                     let answer = try await StoryboardWriter.answer(messages: chat.messages, materials: chat.materials,
                                                                    storyboard: workspace.loadStoryboard(), directory: workspace.baseDirectory,
-                                                                   memory: memory, model: model, looks: looks)
+                                                                   memory: memory, narrator: narrator, model: model, looks: looks)
                     let added = try workspace.project?.remember(answer.remembered) ?? []
                     chat.messages.append(StudioMessage(role: .assistant, text: answer.reply, storyboard: answer.storyboard,
                                                        problems: answer.problems.isEmpty ? nil : answer.problems,
@@ -436,8 +439,34 @@ enum SelfTest {
                 }
 
                 if let format = values("--render").first {
+                    // --voice <ElevenLabs voice id> (or the project's voice) adds
+                    // the voiceover. New lines are recorded only when the key is
+                    // in ELEVENLABS_API_KEY; lines recorded before are free and
+                    // are used either way.
+                    var lines: [Int: Narration.Line] = [:]
+                    if let voice = values("--voice").first ?? workspace.project?.loadMemory().narrator?.id,
+                       let data = workspace.loadStoryboard()?.data(using: .utf8) {
+                        let plan = try Storyboard.plan(from: data, baseDirectory: workspace.baseDirectory)
+                        let cache = workspace.directory.appendingPathComponent("narration", isDirectory: true)
+                        let needs = Narration.needs(in: plan, voice: voice, cache: cache)
+                        let toSend = Narration.charactersToSpeak(needs)
+                        print("voiceover: \(needs.count) lines, \(toSend) characters to send")
+                        if let key = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"], !key.isEmpty {
+                            lines = try await Narration.speak(needs, voice: voice, client: ElevenLabsClient(apiKey: key), cache: cache)
+                        } else if toSend == 0 {
+                            lines = Narration.spoken(needs, cache: cache)
+                        } else if !values("--voice").isEmpty {
+                            print("FAIL set ELEVENLABS_API_KEY to record the voiceover")
+                            exit(1)
+                        } else {
+                            print("voiceover: not recorded (no ELEVENLABS_API_KEY); rendering without a voice")
+                        }
+                        for (scene, line) in lines.sorted(by: { $0.key < $1.key }) {
+                            print("  scene \(scene + 1): \(String(format: "%.2f", line.seconds)) s, \(line.words.count) words")
+                        }
+                    }
                     let summary = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL,
-                                                                baseDirectory: workspace.baseDirectory)
+                                                                baseDirectory: workspace.baseDirectory, narration: lines)
                     print("built scenes=\(summary.scenes) seconds=\(String(format: "%.1f", summary.seconds))")
                     // Remotion is shared from the Studio folder: beside the
                     // projects, or beside a video that stands on its own.

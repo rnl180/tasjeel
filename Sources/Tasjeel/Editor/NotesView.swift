@@ -388,12 +388,14 @@ struct AISettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var keyDraft = ""
     @State private var keyProblem: String?
+    @State private var voiceKeyDraft = ""
+    @State private var voiceKeyProblem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("AI settings").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("Choose what writes your notes and, in the Studio, your storyboards. Only Claude sends anything off this Mac.")
+                Text("Choose what writes your notes and, in the Studio, your storyboards. Of these, only Claude sends anything off this Mac. The voiceover at the bottom is a separate service.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.subtext)
                     .fixedSize(horizontal: false, vertical: true)
@@ -413,6 +415,8 @@ struct AISettingsView: View {
                 option(.claude, title: "Claude", badge: "Cloud, your API key",
                        detail: "The best results, in any language. For notes it sends the transcript text to Anthropic. In the Studio it sends your chat, the storyboard and small copies of the pictures you add, with a few frames of each video. Recordings themselves stay on your Mac. Anthropic bills your key for each use.") { claudeControls }
             }
+
+            voiceCard
 
             HStack {
                 Spacer()
@@ -504,6 +508,74 @@ struct AISettingsView: View {
                     Text(keyProblem).font(.system(size: 11.5)).foregroundStyle(Theme.warn)
                 }
             }
+        }
+    }
+
+    /// ElevenLabs is not one of the writers above: it reads a Studio video's
+    /// narration aloud, whichever of them wrote it.
+    private var voiceCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+                Text("Voiceover: ElevenLabs").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
+                Text("Cloud, your API key")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Theme.accent.opacity(0.14), in: Capsule())
+            }
+            Text("Reads a Studio video's narration aloud. Only the words to be spoken are sent to ElevenLabs, which bills your key by the character. Tasjeel asks before each new voiceover and never pays twice for the same line.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.subtext)
+                .lineSpacing(1.5)
+                .fixedSize(horizontal: false, vertical: true)
+            if ai.hasVoiceKey {
+                HStack(spacing: 8) {
+                    Label("Key saved in your Mac's Keychain", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.good)
+                    Spacer(minLength: 0)
+                    Button("Remove key") { ai.removeVoiceKey() }.buttonStyle(QuietButtonStyle())
+                }
+                if let problem = ai.voicesError {
+                    Text(problem).font(.system(size: 11.5)).foregroundStyle(Theme.warn).fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    SecureField("Paste your ElevenLabs API key", text: $voiceKeyDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .padding(.horizontal, 9)
+                        .frame(height: 28)
+                        .background(Theme.window, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.stroke))
+                        .onSubmit(saveVoiceKey)
+                    Button("Save key", action: saveVoiceKey)
+                        .buttonStyle(QuietButtonStyle())
+                        .disabled(voiceKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Text("The key is stored only in your Mac's Keychain. Create one at elevenlabs.io, under Developers › API Keys.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let voiceKeyProblem {
+                    Text(voiceKeyProblem).font(.system(size: 11.5)).foregroundStyle(Theme.warn)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke))
+    }
+
+    private func saveVoiceKey() {
+        if ai.saveVoiceKey(voiceKeyDraft) {
+            voiceKeyDraft = ""
+            voiceKeyProblem = nil
+        } else {
+            voiceKeyProblem = "The key could not be saved to the Keychain."
         }
     }
 

@@ -66,6 +66,7 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - **PROJECT.md**: the memory is also written out as a brief you can hand to any AI agent, with the commands that let the agent take screenshots of your app, add to the memory and make videos
 - **Screenshots of your app**: take a picture of any open window (a browser, the iPhone simulator, a Mac app) straight into the project, from the Studio or from an AI agent's terminal
 - Watch it inside the app in wide, square and tall; every earlier version can be brought back
+- **Voiceover** with your own ElevenLabs key: pick a voice, the model writes the narration, and the words appear as captions in time with the voice. Tasjeel asks before each new voiceover and never pays twice for the same line
 - Claude (your own API key) sees the pictures you add; a model in Ollama keeps everything on your Mac
 - The model may use only what you gave it and may not invent quotes or figures, and every storyboard is checked before it is used
 - How it works and what is sent where: [docs/studio.md](docs/studio.md)
@@ -178,6 +179,7 @@ A Swift package with two targets and no third-party dependencies:
 | `MemoryDrafter.swift` | Reads a project's website and has a model draft the empty parts of its memory |
 | `StudioWorkspace.swift` | One Studio video on disk: its chat, and the small pictures shown to a model |
 | `StoryboardWriter.swift` | Turns a chat into a checked storyboard: the instructions, reading the answer, sending faults back |
+| `Narration.swift` | The ElevenLabs client, and a video's voiceover: which lines need speaking, the speech kept from before, word timings |
 | `StudioRenderer.swift` | Finds Node.js, keeps one shared copy of Remotion, and renders a size |
 | `RemotionTemplate.swift` | Both projects' files, generated from the folders in `Templates` |
 
@@ -199,7 +201,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `Tasjeel --remotion <recording folder> --out <project folder>` exports a Remotion project.
 - `Tasjeel --storyboard Examples/studio/storyboard.json --out <project folder>` builds a video project from a storyboard.
 - `Tasjeel --project <project folder> --windows --screenshot "Safari" --remember "A fact" --brief` is what an AI agent uses on a Studio project: list open windows, take a screenshot into the project, add to its memory, print its brief. `--from-site example.com --engine ollama` drafts the memory from a website.
-- `Tasjeel --studio <video folder> --add shot.png --say "A launch video for…" --engine ollama --render wide` runs one turn of the Studio: adds material, asks the model, saves the storyboard, renders a size. With `--engine claude` the key is read from `ANTHROPIC_API_KEY`. `TASJEEL_STUDIO=/some/folder` moves the Studio's projects there.
+- `Tasjeel --studio <video folder> --add shot.png --say "A launch video for…" --engine ollama --render wide` runs one turn of the Studio: adds material, asks the model, saves the storyboard, renders a size. With `--engine claude` the key is read from `ANTHROPIC_API_KEY`. `TASJEEL_STUDIO=/some/folder` moves the Studio's projects there. Add `--voice <ElevenLabs voice id>` to record the voiceover, with the key in `ELEVENLABS_API_KEY`; `TASJEEL_ELEVENLABS_URL` points at a stand-in.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
 
@@ -219,7 +221,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 ### About AI notes
 
-- **Your API key is never in this repository or in any file.** You paste it into AI settings and it is stored in the macOS Keychain. Remove it there at any time.
+- **Your API keys are never in this repository or in any file.** You paste them into AI settings (Anthropic for Claude, ElevenLabs for voiceover) and they are stored in the macOS Keychain. Remove them there at any time.
 - Claude requests go straight from your Mac to `api.anthropic.com` using `claude-opus-5-5`, and Anthropic bills your key. If a safety check declines a request, the API is asked to retry on the fallback model Anthropic recommends (`fallbacks: "default"`).
 - The model built into macOS needs Apple Intelligence switched on, knows fewer languages (no Arabic at the time of writing) and reads only a few pages at a time, so long meetings are summarised in parts.
 - For Ollama, AI settings offers to download `gemma4:12b` (about 8 GB), which handles many languages. Any model you already have works too.
@@ -231,7 +233,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 - Editing the transcript, and cutting the video by deleting text
 - Asking questions about a recording, and letting the AI make the cuts
-- Voiceover and music in Studio videos, and publishing them
+- Music in Studio videos, and publishing them
 - Recording a connected iPhone or iPad
 - GIF export
 - Cursor smoothing and click highlights
@@ -239,7 +241,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 ## Plans
 
-- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. Two of five phases are built (storyboards and the Studio chat, above); voiceover, music and publishing are still proposals.
+- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. Storyboards, the Studio chat, project memory and voiceover are built; music and publishing are still proposals.
 
 ## License
 

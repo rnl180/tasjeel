@@ -51,6 +51,20 @@ final class StudioModel: ObservableObject {
     @Published var askDownload = false
     private var formatsToRender: [String] = []
 
+    // Voiceover
+    /// Set when making the video would send new narration to ElevenLabs:
+    /// the user is asked first, because it is charged for.
+    @Published var voiceAsk: VoiceAsk?
+    /// Said under the video when it was made without the voiceover it has.
+    @Published var voiceNote: String?
+
+    struct VoiceAsk: Equatable {
+        var characters: Int
+        var lines: Int
+        /// Characters left in the user's ElevenLabs plan, when known.
+        var left: Int?
+    }
+
     /// A project or a video in a menu.
     struct Entry: Identifiable, Equatable {
         var directory: URL
@@ -122,6 +136,8 @@ final class StudioModel: ObservableObject {
         chatError = nil
         materialError = nil
         renderError = nil
+        voiceNote = nil
+        voiceAsk = nil
         reloadStoryboard()
         reloadLists()
     }
@@ -285,13 +301,14 @@ final class StudioModel: ObservableObject {
         chatError = nil
         writing = Writing(text: "", engine: model.displayName)
         let workspace = workspace, messages = messages, materials = materials, storyboard = storyboard
+        let narrator = ai.hasVoiceKey ? memory.narrator?.name : nil
         let known = "The project is called \(memory.name).\n\n" + ProjectBrief.knowledge(memory)
         chatTask = Task { [weak self] in
             do {
                 let looks = model.seesImages ? await workspace.looks(at: materials) : StudioWorkspace.Looks()
                 let answer = try await StoryboardWriter.answer(messages: messages, materials: materials, storyboard: storyboard,
                                                                directory: workspace.baseDirectory, memory: known,
-                                                               model: model, looks: looks) { partial in
+                                                               narrator: narrator, model: model, looks: looks) { partial in
                     Task { @MainActor in
                         if self?.writing != nil, self?.workspace == workspace { self?.writing?.text = partial }
                     }
@@ -507,11 +524,42 @@ final class StudioModel: ObservableObject {
         }
     }
 
+    // MARK: - Voiceover
+
+    /// Where a video's spoken lines are kept, so none is paid for twice.
+    private var narrationCache: URL { workspace.directory.appendingPathComponent("narration", isDirectory: true) }
+
+    /// Chooses the voice that reads this project's videos, or none.
+    func setNarrator(_ voice: ElevenLabsClient.Voice?) {
+        let chosen = voice.map { ProjectMemory.Narrator(id: $0.id, name: $0.name) }
+        guard chosen != memory.narrator else { return }
+        var changed = memory
+        changed.narrator = chosen
+        save(changed)
+        // The video on screen was made with the old choice.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: workspace.storyboardURL.path)
+        refreshVideo()
+        // A storyboard written without a voiceover has nothing to read out yet.
+        if chosen != nil, let outline, !outline.scenes.contains(where: { $0.say != nil }), draft.isEmpty {
+            draft = "Add narration for the voiceover."
+        }
+    }
+
+    /// The lines the storyboard wants spoken in the project's voice.
+    private func narrationNeeds() -> [Narration.Need] {
+        guard let narrator = memory.narrator, let data = storyboard?.data(using: .utf8),
+              let plan = try? Storyboard.plan(from: data, baseDirectory: workspace.baseDirectory) else { return [] }
+        return Narration.needs(in: plan, voice: narrator.id, cache: narrationCache)
+    }
+
+    // MARK: - Making the video
+
     /// Builds the project and renders the chosen size, or every size.
     func createVideo(allSizes: Bool = false) {
         guard render == nil, let outline else { return }
         formatsToRender = allSizes ? outline.formats : [format]
         renderError = nil
+        voiceNote = nil
         if StudioRenderer.needsDownload(project: workspace.videoURL, root: root) {
             guard StudioRenderer.findNode() != nil else {
                 renderError = StudioRenderer.RenderError.noNode.localizedDescription
@@ -523,12 +571,50 @@ final class StudioModel: ObservableObject {
         startRender()
     }
 
-    /// Continues after the user agreed to download Remotion.
+    /// Continues once Remotion is there or the user agreed to download it:
+    /// asks about the voiceover if making it would cost anything.
     func startRender() {
         guard render == nil, !formatsToRender.isEmpty else { return }
+        let needs = narrationNeeds()
+        guard !needs.isEmpty else {
+            run(voice: false)
+            return
+        }
+        guard let client = ai.voiceClient() else {
+            voiceNote = "This video has narration but no ElevenLabs key is set up, so it was made without a voice. Add the key in AI Settings."
+            run(voice: false)
+            return
+        }
+        let characters = Narration.charactersToSpeak(needs)
+        guard characters > 0 else {
+            // Every line was recorded before: nothing is sent, nothing is charged.
+            run(voice: true)
+            return
+        }
+        let ask = VoiceAsk(characters: characters, lines: needs.filter { !$0.isSpoken }.count, left: nil)
+        let workspace = workspace
+        Task {
+            // Knowing what is left of the plan is a courtesy, not a condition.
+            let left = try? await client.usage().left
+            guard self.workspace == workspace, render == nil else { return }
+            voiceAsk = VoiceAsk(characters: ask.characters, lines: ask.lines, left: left)
+        }
+    }
+
+    /// Builds and renders, with the voiceover when `voice` is true.
+    func run(voice: Bool) {
+        guard render == nil, !formatsToRender.isEmpty else { return }
+        voiceAsk = nil
         let workspace = workspace, project = project, formats = formatsToRender, root = root
+        let needs = voice ? narrationNeeds() : []
+        let narrator = memory.narrator
+        let client = voice ? ai.voiceClient() : nil
+        let cache = narrationCache
+        if !voice, memory.narrator != nil, !narrationNeeds().isEmpty, voiceNote == nil {
+            voiceNote = "Made without the voiceover. Press Update Video to add it."
+        }
         player.pause()
-        render = RenderJob(fraction: nil, label: "Preparing the clips…")
+        render = RenderJob(fraction: nil, label: needs.isEmpty ? "Preparing the clips…" : "Recording the voiceover…")
         renderTask = Task { [weak self] in
             @Sendable func update(_ fraction: Double?, _ label: String) {
                 Task { @MainActor in
@@ -536,7 +622,15 @@ final class StudioModel: ObservableObject {
                 }
             }
             do {
-                _ = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL, baseDirectory: workspace.baseDirectory)
+                var lines: [Int: Narration.Line] = [:]
+                if let client, let narrator, !needs.isEmpty {
+                    lines = try await Narration.speak(needs, voice: narrator.id, client: client, cache: cache) { done, total in
+                        if total > 0 { update(nil, "Recording the voiceover (\(min(done + 1, total)) of \(total))…") }
+                    }
+                    update(nil, "Preparing the clips…")
+                }
+                _ = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL,
+                                                  baseDirectory: workspace.baseDirectory, narration: lines)
                 for (index, format) in formats.enumerated() {
                     try Task.checkCancellation()
                     let name = formats.count > 1 ? "\(format.capitalized): " : ""

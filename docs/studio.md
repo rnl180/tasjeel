@@ -52,6 +52,26 @@ Tasjeel takes the picture but does not click or type. Getting the app to the rig
 
 After a change to the storyboard the video is marked out of date; **Update Video** renders it again. Every answer that changed the storyboard keeps its version, so **Go Back to This Version** under an earlier answer undoes what came after.
 
+## Voiceover
+
+A video can be read aloud by a voice from [ElevenLabs](https://elevenlabs.io), with the words shown as captions that follow the voice.
+
+1. In **AI Settings**, paste your ElevenLabs API key under **Voiceover: ElevenLabs**. It is kept in your Mac's Keychain.
+2. Above the video, open the **Voice** menu and choose one of the voices in your ElevenLabs account. The choice belongs to the project, so all its videos speak with the same voice. **No Voiceover** turns it off.
+3. Ask the chat for the video as usual. With a voice chosen, the model also writes what the narrator says in each scene. For a video written before, ask it to *add narration*.
+4. Press **Create Video**. Tasjeel tells you how many characters it is about to send and how many your plan has left, and waits for your answer: **Record and Create Video**, **Create Without Voice**, or cancel.
+
+What to know:
+
+- **What is sent:** only the words to be spoken, to ElevenLabs. ElevenLabs bills your key by the character.
+- **Nothing is paid for twice.** Each spoken line is kept in the video's folder. Rendering another size, or changing one scene, sends only the lines that are new. Changing the voice sends them all again.
+- **A scene lasts as long as its line.** Scenes are lengthened to fit what is said, so a narrated video is usually longer than the storyboard's own timings; the length shown above the video is an estimate until it is made.
+- **A recording cannot be stretched.** A scene that shows a clip can only last as long as the clip has left. If its narration is longer, Tasjeel says so (before any speech is paid for, when it can tell from the length of the text) and the model shortens the line.
+- **Captions** are on whenever there is a voice. Ask the chat for *no captions* to turn them off.
+- The voice is ElevenLabs' `eleven_multilingual_v2` model, which speaks Arabic and 28 other languages.
+
+Without a key or a voice, videos are made as before: silent, apart from a recording's own sound when a scene keeps it.
+
 ## What writes the storyboard
 
 Chosen in **AI Settings**, the same setting the notes use:
@@ -93,6 +113,7 @@ It can still write something you would not say. Read the scenes before you publi
             Launch/
                 storyboard.json   the video; you can edit it by hand
                 chat.json         the conversation
+                narration/        each spoken line, kept so it is never paid for twice
                 video/            the Remotion project built from the storyboard
                     out/          wide.mp4, square.mp4, tall.mp4
     .remotion-4.x/            the shared copy of Remotion (hidden)
@@ -104,7 +125,9 @@ Videos made with the first version of the Studio, which had no projects, each be
 
 ## Not yet
 
-- Voiceover, music and publishing: the next phases of the [plan](plans/marketing-video-studio.md). Today's videos are silent unless a recording's own sound is kept.
+- Music and sound effects, and publishing: the rest of the [plan](plans/marketing-video-studio.md).
+- A free voice for people without an ElevenLabs key, and trying a voice before choosing it.
+- Captions that can be styled or moved; they sit at the bottom of the picture.
 - Reading a site that needs a browser to show its words, or one behind a sign-in.
 - Fonts and writing samples in the memory.
 - Moving around an app by itself. Tasjeel photographs the window it is shown; it does not click through your app.

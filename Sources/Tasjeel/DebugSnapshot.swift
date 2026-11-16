@@ -85,18 +85,36 @@ enum DebugSnapshot {
                             print("studio: no window matching \(words) among \(Set(AppState.shared.windows.map(\.appName)).sorted()) (screen access=\(AppState.shared.hasScreenAccess))")
                         }
                     }
+                    // TASJEEL_SNAPSHOT_STUDIO_VOICE=<name> picks that voice from
+                    // the account, as the Voice menu does.
+                    if let wanted = env["TASJEEL_SNAPSHOT_STUDIO_VOICE"] {
+                        await AIConfig.shared.loadVoices()
+                        let voice = AIConfig.shared.voices.first { $0.name.lowercased() == wanted.lowercased() }
+                        studio.setNarrator(voice)
+                        print("studio: voices=\(AIConfig.shared.voices.count) chosen=\(studio.memory.narrator?.name ?? "none") draft=\(studio.draft) error=\(AIConfig.shared.voicesError ?? "none")")
+                    }
                     if env["TASJEEL_SNAPSHOT_STUDIO_RENDER"] != nil {
                         studio.createVideo()
                         if studio.askDownload {
                             studio.askDownload = false
                             studio.startRender()
                         }
+                        // The question about paying for a voiceover, answered yes.
+                        var asked = 0.0
+                        while studio.render == nil, studio.voiceAsk == nil, asked < 5 {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            asked += 0.1
+                        }
+                        if let ask = studio.voiceAsk {
+                            print("studio: voice question: \(StudioView.voiceQuestion(ask))")
+                            studio.run(voice: true)
+                        }
                         var waited = 0.0
                         while studio.render != nil, waited < 900 {
                             try? await Task.sleep(nanoseconds: 200_000_000)
                             waited += 0.2
                         }
-                        print("studio: video=\(studio.videoURL?.lastPathComponent ?? "none") stale=\(studio.videoIsStale) error=\(studio.renderError ?? "none")")
+                        print("studio: video=\(studio.videoURL?.lastPathComponent ?? "none") stale=\(studio.videoIsStale) voice=\(studio.memory.narrator?.name ?? "none") note=\(studio.voiceNote ?? "none") error=\(studio.renderError ?? "none")")
                     }
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     write(windowMatching: "studio", to: directory.appendingPathComponent("studio.png"))

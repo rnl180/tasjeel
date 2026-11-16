@@ -43,14 +43,17 @@ public enum StoryboardWriter {
     ///   - storyboard: the storyboard file as it is now, if there is one.
     ///   - directory: the project folder; files in a storyboard are relative to it.
     ///   - memory: what is known about the project the video belongs to.
+    ///   - narrator: the name of the voice that will read the video aloud,
+    ///     or nil when the video has no voiceover.
     ///   - looks: pictures of the materials, for models that can see.
     ///   - partial: receives the reply so far while it is being written.
     public static func answer(messages: [StudioMessage], materials: [StudioMaterial], storyboard: String?, directory: URL,
-                              memory: String? = nil, model: any TextModel, looks: StudioWorkspace.Looks = .init(),
+                              memory: String? = nil, narrator: String? = nil, model: any TextModel,
+                              looks: StudioWorkspace.Looks = .init(),
                               partial: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Answer {
         let images = model.seesImages ? looks.images : []
         let prompt = Prompt.request(messages: messages, materials: materials, storyboard: storyboard, memory: memory,
-                                    labels: model.seesImages ? looks.labels : [:], budget: model.transcriptBudget)
+                                    narrator: narrator, labels: model.seesImages ? looks.labels : [:], budget: model.transcriptBudget)
         let first = try await ask(model, prompt: prompt, images: images) { partial(Reply.visible($0)) }
         guard var proposed = first.storyboard else { return Answer(reply: first.reply, remembered: first.remembered) }
         var reply = first.reply
@@ -91,8 +94,21 @@ public enum StoryboardWriter {
     static func check(_ storyboard: [String: Any], directory: URL) async -> [String] {
         guard let data = try? JSONSerialization.data(withJSONObject: storyboard) else { return ["The storyboard could not be read."] }
         do {
-            let plan = try Storyboard.plan(from: data, baseDirectory: directory)
-            return await StudioProject.clipProblems(in: plan)
+            var plan = try Storyboard.plan(from: data, baseDirectory: directory)
+            // A screen scene lasts as long as its narration, so a line too
+            // long for the clip is caught here, before any speech is paid for.
+            let scenes = plan.storyboard["scenes"] as? [[String: Any]] ?? []
+            var narrated = Set<Int>()
+            for index in plan.clips.indices {
+                let scene = plan.clips[index].scene
+                guard let say = scenes[scene]["say"] as? String else { continue }
+                let needed = Narration.leadIn + Narration.estimate(say) + Narration.leadOut
+                if needed > plan.clips[index].seconds {
+                    plan.clips[index].seconds = (needed * 10).rounded() / 10
+                    narrated.insert(scene)
+                }
+            }
+            return await StudioProject.clipProblems(in: plan, narrated: narrated)
         } catch StoryboardError.invalid(let problems) {
             return problems
         } catch {
@@ -216,11 +232,11 @@ public enum StoryboardWriter {
           ]
         }
 
-        Top level: "title"; "language" (the language of the video's words, such as "en" or "ar"; Arabic and Hebrew are laid out right to left automatically); "formats" (any of "wide", "square", "tall"; leave it out for all three); "brand"; "scenes" (1 to 40, in order).
+        Top level: "title"; "captions" (leave it out; see Voiceover); "language" (the language of the video's words, such as "en" or "ar"; Arabic and Hebrew are laid out right to left automatically); "formats" (any of "wide", "square", "tall"; leave it out for all three); "brand"; "scenes" (1 to 40, in order).
 
         Brand: "name" (shown at the end when there is no logo), "logo" (a picture from the materials), and three colours written like "#8F7CFF": "background", "text", "accent". Leave a colour out to keep the default dark look. When you can see the product or the logo, pick colours that suit it, and keep text easy to read against the background.
 
-        Every scene has a "type" and may have "seconds" (1 to 30). The number after each field is the most characters it may hold; text is shown large, so shorter is better.
+        Every scene has a "type" and may have "seconds" (1 to 30) and "say" (what the narrator says during it, 400; see Voiceover below). The number after each field is the most characters it may hold; text is shown large, so shorter is better.
 
         - "hook": the opening line, its words rising in one by one. "text" (required, 140), "kicker" (a small line above, such as "NEW", 60). 3 seconds if you do not say.
         - "screen": a piece of a video from the materials, shown as a floating window. "video" (required), "start" (where in the video to begin, in seconds), "caption" (a line under it, 140), "sound" (true to keep the video's sound; silent otherwise). 6 seconds. "start" plus "seconds" must not run past the end of the video.
@@ -240,6 +256,18 @@ public enum StoryboardWriter {
         - For a recording, choose the part worth showing. When you are told what is said at which time, use it to pick "start".
         - Write like a person talking to another person. One idea per scene. No filler such as "revolutionary" or "seamless".
 
+        # Voiceover
+
+        The request says whether this video has a voiceover. When it does, write "say" for every scene: what a narrator reads aloud while the scene is on screen. Tasjeel has it spoken and shows the words as captions in time with the voice.
+
+        - Write for the ear. Full, short sentences a person would say, not the on-screen text read out. The voice adds what the screen does not show; the screen shows what the voice names.
+        - A narrator speaks about two and a half words a second. Tasjeel lengthens a scene to fit its line, so do not pad "seconds", but keep each line to one or two sentences or the video drags.
+        - A screen scene can only last as long as what is left of its clip after "start". Keep its line short enough for that: about two words for each second of clip.
+        - Spell out what should be spoken as words, such as "twelve thousand" for a figure and "orbit dot example dot com" for an address, when the written form would be read oddly.
+        - Set "captions" to false at the top level only if the person asks for no captions.
+
+        When the request says there is no voiceover, write no "say" at all, and say nothing about voiceover unless the person asks. If they ask for one, tell them to choose a voice with the Voice button above the video; it needs their ElevenLabs key.
+
         # The project's memory
 
         A video usually belongs to a project: a product or an app the person makes many videos for. When the request starts with "About the project", that is what Tasjeel has remembered about it. Rely on it instead of asking again: its audience, the way it talks, its features, its brand colours and logo. Facts listed there as true may be shown in the video. What the person says in the chat wins over the memory where they differ.
@@ -255,7 +283,7 @@ public enum StoryboardWriter {
         """
 
         static func request(messages: [StudioMessage], materials: [StudioMaterial], storyboard: String?, memory: String? = nil,
-                            labels: [String: [String]], budget: Int) -> String {
+                            narrator: String? = nil, labels: [String: [String]], budget: Int) -> String {
             var parts: [String] = []
             if var memory = memory?.trimmingCharacters(in: .whitespacesAndNewlines), !memory.isEmpty {
                 // Never more than a third of what a small model can read.
@@ -287,6 +315,11 @@ public enum StoryboardWriter {
             if !earlier.isEmpty {
                 let lines = earlier.map { "\($0.role == .user ? "Person" : "You"): \($0.text)" }
                 parts.append("# The conversation so far\n\n" + lines.joined(separator: "\n\n"))
+            }
+            if let narrator {
+                parts.append("# Voiceover\n\nThis video has a voiceover, read by a voice called \(narrator). Write \"say\" for every scene.")
+            } else {
+                parts.append("# Voiceover\n\nThis video has no voiceover. Do not write \"say\".")
             }
             parts.append("# The person's new message\n\n\(latest)")
             return parts.joined(separator: "\n\n")

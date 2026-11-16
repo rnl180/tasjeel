@@ -76,6 +76,19 @@ public struct ProjectMemory: Codable, Equatable, Sendable {
     public var app: App
     public var notes: String
     public var learned: [Learned]
+    /// The voice that reads this project's videos aloud, or nil for none.
+    public var narrator: Narrator?
+
+    /// A voice in the user's ElevenLabs account.
+    public struct Narrator: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
+        }
+    }
 
     public init(name: String, kind: Kind = .app, summary: String = "", audience: String = "", voice: String = "",
                 features: [String] = [], facts: [String] = [], links: [String] = [], accent: String = "", background: String = "",
@@ -117,12 +130,14 @@ public struct ProjectMemory: Codable, Equatable, Sendable {
         app = try values.decodeIfPresent(App.self, forKey: .app) ?? App()
         notes = try text(.notes)
         learned = try values.decodeIfPresent([Learned].self, forKey: .learned) ?? []
+        narrator = try values.decodeIfPresent(Narrator.self, forKey: .narrator)
     }
 
     /// True when nothing but the name has been filled in.
     public var isEmpty: Bool {
         var blank = ProjectMemory(name: name, kind: kind)
         blank.app.platforms = app.platforms
+        blank.narrator = narrator
         return self == blank
     }
 
@@ -480,6 +495,7 @@ public enum ProjectBrief {
         for (label, value) in [("Accent colour", memory.accent), ("Background colour", memory.background), ("Text colour", memory.text)] where !value.isEmpty {
             brand.append("\(label): \(value)")
         }
+        if let narrator = memory.narrator { brand.append("Voice for voiceovers: \(narrator.name)") }
         section("Brand", bullets(brand))
 
         if memory.kind == .app {
@@ -573,6 +589,8 @@ public enum ProjectBrief {
         \(command) --studio "\(here)/videos/\(video)" --say "A 20-second launch video for the new export screen"
         \(command) --studio "\(here)/videos/\(video)" --render wide
         ```
+
+        Rendering uses a voiceover only for lines already recorded, which cost nothing. Recording new narration is charged to the owner's ElevenLabs account, so it is done from the Studio, where they are asked first.
 
         Paths may start with `~`; Tasjeel expands it. Screenshots need the terminal you run in to be allowed under System Settings, Privacy & Security, Screen & System Audio Recording. A screenshot shows the window as it is at that moment. Tasjeel takes the picture but does not click or type, so get the app to the screen you want first, with whatever you have for that (a browser tool for a web app, a simulator tool for a phone app), or ask the person to open it.
         """

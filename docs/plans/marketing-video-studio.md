@@ -1,6 +1,6 @@
 # Plan: Marketing Video Studio
 
-Status: proposal, nothing built yet. Written 16 November 2026.
+Status: phase 1 is built (see [Storyboards](../storyboard.md)). Phases 2 to 5 are proposals. Written 16 November 2026.
 
 ## What this is
 
@@ -74,7 +74,7 @@ Both will be checked again when the work starts, since the details change.
 
 Each phase ends with something usable.
 
-**1. Storyboard to video.** The storyboard format, the six scene templates, the brand kit, and a builder that turns a hand-written storyboard into a Remotion project. No AI and no keys. Done when a storyboard file renders to a correct video in three sizes.
+**1. Storyboard to video. Done.** The storyboard format, the six scene templates, the brand kit, and a builder that turns a hand-written storyboard into a Remotion project. No AI and no keys. The example in `Examples/studio` renders in all three sizes, and an Arabic storyboard renders right to left.
 
 **2. Chat to storyboard.** The Studio window: material in, chat on one side, storyboard and preview on the other. Claude writes and revises the storyboard. Done when a described video comes out watchable without touching the file.
 

@@ -16,6 +16,8 @@ enum Main {
             SelfTest.notes()
         } else if args.contains("--remotion") {
             SelfTest.remotion()
+        } else if args.contains("--storyboard") {
+            SelfTest.storyboard()
         } else {
             TasjeelApp.main()
         }

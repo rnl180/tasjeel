@@ -144,6 +144,44 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Builds a marketing video project from a storyboard file: choose the
+    /// storyboard, choose where the project goes, and it opens in Finder.
+    func buildFromStoryboard() {
+        let open = NSOpenPanel()
+        open.allowedContentTypes = [.json]
+        open.allowsMultipleSelection = false
+        open.message = "Choose a storyboard: a JSON file listing the scenes of your video."
+        open.begin { response in
+            guard response == .OK, let storyboard = open.url else { return }
+            let save = NSSavePanel()
+            save.title = "Save Video Project"
+            save.nameFieldLabel = "Folder name:"
+            save.nameFieldStringValue = storyboard.deletingPathExtension().lastPathComponent + " Video"
+            save.directoryURL = storyboard.deletingLastPathComponent()
+            save.canCreateDirectories = true
+            save.begin { response in
+                guard response == .OK, let folder = save.url else { return }
+                Task { @MainActor in
+                    let alert = NSAlert()
+                    do {
+                        let summary = try await StudioProject.build(storyboard: storyboard, in: folder)
+                        let sizes = summary.formats.joined(separator: ", ")
+                        alert.messageText = summary.created ? "The video project is ready" : "The video project was updated"
+                        alert.informativeText = "\(summary.scenes) scenes, \(Format.clock(summary.seconds)) long, in \(sizes). Double-click Start in its folder to preview it, and Render to make the videos."
+                        alert.addButton(withTitle: "Open Folder")
+                        alert.addButton(withTitle: "Done")
+                        if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(folder) }
+                    } catch {
+                        alert.alertStyle = .warning
+                        alert.messageText = "The video project could not be built"
+                        alert.informativeText = error.localizedDescription
+                        alert.runModal()
+                    }
+                }
+            }
+        }
+    }
+
     func revealLibraryFolder() {
         try? FileManager.default.createDirectory(at: store.root, withIntermediateDirectories: true)
         NSWorkspace.shared.open(store.root)

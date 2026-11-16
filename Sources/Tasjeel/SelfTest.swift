@@ -230,6 +230,34 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --storyboard <storyboard.json> --out <project folder>`
+    ///
+    /// Builds a Remotion project from a storyboard file, as the app's
+    /// "New Video from Storyboard…" command does. See Examples/studio.
+    static func storyboard() {
+        let args = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let path = value("--storyboard"), let out = value("--out") else {
+            print("FAIL usage: --storyboard <storyboard.json> --out <project folder>")
+            exit(1)
+        }
+        Task {
+            do {
+                let summary = try await StudioProject.build(storyboard: URL(fileURLWithPath: path),
+                                                            in: URL(fileURLWithPath: out, isDirectory: true))
+                print("OK \(summary.created ? "created" : "updated") scenes=\(summary.scenes) seconds=\(String(format: "%.1f", summary.seconds)) sizes=\(summary.formats.joined(separator: ","))")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

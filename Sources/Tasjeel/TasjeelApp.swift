@@ -22,6 +22,8 @@ struct TasjeelApp: App {
                     .keyboardShortcut("n")
                 Button("Open Recordings Folder") { app.revealLibraryFolder() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Divider()
+                Button("New Video from Storyboard…") { app.buildFromStoryboard() }
             }
         }
 

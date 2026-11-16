@@ -121,22 +121,24 @@ final class RemotionTests: XCTestCase {
         XCTAssertEqual(RemotionProject.packageName(for: "  --Hello--  "), "hello")
     }
 
-    /// The Swift copy of the template is generated from Templates/remotion.
-    /// If this fails, run scripts/embed-remotion-template.py.
-    func testEmbeddedTemplateMatchesTheTemplateFolder() throws {
+    /// The Swift copies of the templates are generated from the folders in
+    /// Templates. If this fails, run scripts/embed-remotion-template.py.
+    func testEmbeddedTemplatesMatchTheTemplateFolders() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let folder = root.appendingPathComponent("Templates/remotion")
-        var onDisk: [String: String] = [:]
-        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]))
-        for case let url as URL in enumerator where (try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-            guard url.lastPathComponent != ".DS_Store" else { continue }
-            let relative = String(url.standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count + 1))
-            onDisk[relative] = try String(contentsOf: url, encoding: .utf8)
-        }
-        let embedded = Dictionary(uniqueKeysWithValues: RemotionTemplate.files.map { ($0.path, $0.text) })
-        XCTAssertEqual(Set(embedded.keys), Set(onDisk.keys))
-        for (path, text) in onDisk {
-            XCTAssertEqual(embedded[path], text, "\(path) differs: run scripts/embed-remotion-template.py")
+        for (name, files) in [("remotion", RemotionTemplate.files), ("studio", RemotionTemplate.studioFiles)] {
+            let folder = root.appendingPathComponent("Templates/\(name)")
+            var onDisk: [String: String] = [:]
+            let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]))
+            for case let url as URL in enumerator where (try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                guard url.lastPathComponent != ".DS_Store" else { continue }
+                let relative = String(url.standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count + 1))
+                onDisk[relative] = try String(contentsOf: url, encoding: .utf8)
+            }
+            let embedded = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.text) })
+            XCTAssertEqual(Set(embedded.keys), Set(onDisk.keys), name)
+            for (path, text) in onDisk {
+                XCTAssertEqual(embedded[path], text, "\(name)/\(path) differs: run scripts/embed-remotion-template.py")
+            }
         }
     }
 }

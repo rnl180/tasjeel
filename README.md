@@ -58,6 +58,15 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - Exporting again refreshes the video and its data and keeps your changes to the code
 - Works right to left for Arabic
 
+**Marketing videos from a storyboard** (optional, needs Node.js)
+
+- Write a video down as a list of scenes and Tasjeel builds it: **File › New Video from Storyboard…**
+- Six kinds of scene: an opening line, a piece of a recording, a feature with points, a customer quote, figures that count up, and a closing call to action
+- One brand kit (logo, colours, font) applies to every scene
+- Renders wide (16:9), square and tall (9:16) from the same storyboard, left to right or right to left
+- Mistakes in the storyboard are listed all at once, in plain words
+- The format and an example: [docs/storyboard.md](docs/storyboard.md)
+
 **Export**
 
 - MP4 in H.264 or HEVC, at the recording's own resolution by default (up to 4K) or scaled down to 1440p, 1080p or 720p, at 30 or 60 fps
@@ -151,7 +160,9 @@ A Swift package with two targets and no third-party dependencies:
 | `AIEngines.swift` | The three models (Apple, Ollama, Claude) and the rule for choosing between them |
 | `MeetingNotes.swift` | Notes and chapters, re-timing chapters after cuts, Markdown export |
 | `RemotionProject.swift` | Writes a recording out as a Remotion project |
-| `RemotionTemplate.swift` | The project's files, generated from `Templates/remotion` |
+| `Storyboard.swift` | Checks a storyboard and fills in its defaults |
+| `StudioProject.swift` | Builds a video project from a storyboard, trimming clips to what each scene uses |
+| `RemotionTemplate.swift` | Both projects' files, generated from the folders in `Templates` |
 
 ### Development
 
@@ -169,6 +180,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `Tasjeel --transcribe <recording folder> --language en-US` transcribes a recording and prints the lines.
 - `Tasjeel --notes <recording folder> --engine ollama` writes AI notes from a saved transcript and prints them. `TASJEEL_OLLAMA_URL` points the app at an Ollama on another address.
 - `Tasjeel --remotion <recording folder> --out <project folder>` exports a Remotion project.
+- `Tasjeel --storyboard Examples/studio/storyboard.json --out <project folder>` builds a video project from a storyboard.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
 
@@ -180,7 +192,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 ### About the Remotion export
 
-- The template lives in `Templates/remotion` as ordinary files, so it can be opened and run with Remotion. After changing it, run `scripts/embed-remotion-template.py`, which copies it into `RemotionTemplate.swift`; a test fails if the two differ.
+- The templates live in `Templates/remotion` (a recording) and `Templates/studio` (a storyboard) as ordinary files, so they can be opened and run with Remotion. After changing one, run `scripts/embed-remotion-template.py`, which copies them into `RemotionTemplate.swift`; a test fails if they differ.
 - To check a template change for real: `Tasjeel --remotion <recording> --out /tmp/project`, then in that folder `npm install`, `npm run typecheck` and `npm run render`.
 - The project is pinned to one Remotion version (all Remotion packages must match). `npx remotion upgrade` moves it forward.
 - Tasjeel hands Remotion an H.264 MP4 with the cuts, zooms, wallpaper and camera already applied, because the video component Remotion recommends does not play HEVC. Captions are not burned in; Remotion draws them from `src/recording.json`.
@@ -206,7 +218,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 ## Plans
 
-- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. A proposal; nothing is built yet.
+- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. The first of five phases is built (storyboards, above); the chat, voiceover and publishing are still proposals.
 
 ## License
 

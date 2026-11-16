@@ -58,21 +58,7 @@ public enum RemotionProject {
     public static func write(to directory: URL, title: String, data: Data) throws -> Bool {
         try prepare(directory)
         let fresh = !FileManager.default.fileExists(atPath: directory.appendingPathComponent("package.json").path)
-        for file in RemotionTemplate.files {
-            // A file called .gitignore in this repository would apply to the
-            // repository itself, so the template keeps it without the dot.
-            let path = file.path == "gitignore" ? ".gitignore" : file.path
-            let url = directory.appendingPathComponent(path)
-            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let text = file.text
-                .replacingOccurrences(of: "__NAME__", with: packageName(for: title))
-                .replacingOccurrences(of: "__TITLE__", with: title)
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            if path.hasSuffix(".command") {
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-            }
-        }
+        try writeTemplate(RemotionTemplate.files, to: directory, title: title)
         let dataURL = directory.appendingPathComponent(dataPath)
         try FileManager.default.createDirectory(at: dataURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: dataURL, options: .atomic)
@@ -119,6 +105,26 @@ public enum RemotionProject {
             ] as [String: Any]
         }
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
+
+    /// Writes a template's files into `directory`, filling in the project's
+    /// name and title. Files that already exist are left alone.
+    static func writeTemplate(_ files: [RemotionTemplate.File], to directory: URL, title: String) throws {
+        for file in files {
+            // A file called .gitignore in this repository would apply to the
+            // repository itself, so the templates keep it without the dot.
+            let path = file.path == "gitignore" ? ".gitignore" : file.path
+            let url = directory.appendingPathComponent(path)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let text = file.text
+                .replacingOccurrences(of: "__NAME__", with: packageName(for: title))
+                .replacingOccurrences(of: "__TITLE__", with: title)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            if path.hasSuffix(".command") {
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            }
+        }
     }
 
     /// A name npm accepts: lower-case letters, digits and hyphens.

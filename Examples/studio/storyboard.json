@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "title": "Tasjeel launch video",
+  "language": "en",
+  "formats": ["wide", "square", "tall"],
+  "brand": {
+    "name": "Tasjeel",
+    "logo": "logo.svg",
+    "background": "#0C0D11",
+    "text": "#FFFFFF",
+    "accent": "#8F7CFF"
+  },
+  "scenes": [
+    {
+      "type": "hook",
+      "kicker": "NEW IN TASJEEL",
+      "text": "Record it once. Share it sharp."
+    },
+    {
+      "type": "screen",
+      "video": "clip.mp4",
+      "seconds": 5,
+      "caption": "Pick a size, press Export."
+    },
+    {
+      "type": "feature",
+      "image": "screenshot.svg",
+      "headline": "Sharp on every frame",
+      "points": [
+        "Full Retina resolution",
+        "Colours as they were on screen",
+        "Smaller files than before"
+      ]
+    },
+    {
+      "type": "numbers",
+      "headline": "Built for long meetings",
+      "items": [
+        { "value": 4, "suffix": "K", "label": "export" },
+        { "value": 60, "suffix": " fps", "label": "smooth motion" },
+        { "value": 0, "prefix": "$", "label": "no subscription" }
+      ]
+    },
+    {
+      "type": "quote",
+      "quote": "Replace this with something a real customer said about your product.",
+      "name": "Customer name",
+      "role": "Their role"
+    },
+    {
+      "type": "cta",
+      "text": "Try it today",
+      "link": "github.com/rnl180/tasjeel"
+    }
+  ]
+}

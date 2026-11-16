@@ -71,10 +71,10 @@ public final class FrameRenderer: @unchecked Sendable {
         if let screen {
             let r = layout.screenRect
             let ext = screen.extent
-            var image = screen
-                .transformed(by: CGAffineTransform(translationX: -ext.minX, y: -ext.minY))
-                .transformed(by: CGAffineTransform(scaleX: r.width / ext.width, y: r.height / ext.height))
-                .transformed(by: CGAffineTransform(translationX: r.minX, y: r.minY))
+            // Work out one scale and one offset for the whole placement (fit
+            // into the frame, then zoom), so the picture is resampled once.
+            var scale = CGSize(width: r.width / ext.width, height: r.height / ext.height)
+            var offset = CGPoint(x: r.minX, y: r.minY)
 
             let zoom = ZoomMath.state(at: sourceTime, zooms: edit.zooms)
             if zoom.scale > 1.0005 {
@@ -86,11 +86,12 @@ public final class FrameRenderer: @unchecked Sendable {
                 var target = CGPoint(x: focus.x + (r.midX - focus.x) * e, y: focus.y + (r.midY - focus.y) * e)
                 target.x = min(max(target.x, r.maxX - s * (r.maxX - focus.x)), r.minX + s * (focus.x - r.minX))
                 target.y = min(max(target.y, r.maxY - s * (r.maxY - focus.y)), r.minY + s * (focus.y - r.minY))
-                let t = CGAffineTransform(translationX: -focus.x, y: -focus.y)
-                    .concatenating(CGAffineTransform(scaleX: s, y: s))
-                    .concatenating(CGAffineTransform(translationX: target.x, y: target.y))
-                image = image.transformed(by: t)
+                scale = CGSize(width: scale.width * s, height: scale.height * s)
+                offset = CGPoint(x: s * (r.minX - focus.x) + target.x, y: s * (r.minY - focus.y) + target.y)
             }
+            var image = screen.transformed(by: CGAffineTransform(translationX: -ext.minX, y: -ext.minY))
+            image = Self.resampled(image, scale: scale)
+                .transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y))
             image = image.cropped(to: r)
 
             if layout.radius > 0.5 {
@@ -124,8 +125,7 @@ public final class FrameRenderer: @unchecked Sendable {
                     .concatenating(CGAffineTransform(translationX: crop.width, y: 0)))
             }
             let s = rect.width / crop.width
-            image = image
-                .transformed(by: CGAffineTransform(scaleX: s, y: s))
+            image = Self.resampled(image, scale: CGSize(width: s, height: s))
                 .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
                 .cropped(to: rect)
             out = image.applyingFilter("CIBlendWithMask", parameters: [
@@ -221,6 +221,25 @@ public final class FrameRenderer: @unchecked Sendable {
     private func rasterise(_ image: CIImage, region: CGRect) -> CIImage {
         guard let cg = context.createCGImage(image, from: region) else { return image }
         return CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: region.minX, y: region.minY))
+    }
+
+    /// Resizes a picture whose origin is at zero. Text is the whole point of a
+    /// screen recording, and the plain resize Core Image does by default
+    /// leaves it soft, so this uses a Lanczos filter, which keeps edges crisp
+    /// both when shrinking a Retina recording and when zooming into it.
+    static func resampled(_ image: CIImage, scale: CGSize) -> CIImage {
+        guard scale.width > 0, scale.height > 0 else { return image }
+        if abs(scale.width - 1) < 0.0005, abs(scale.height - 1) < 0.0005 { return image }
+        let extent = image.extent
+        let filter = CIFilter.lanczosScaleTransform()
+        // Repeating the edge pixels outwards keeps the border from fading.
+        filter.inputImage = image.clampedToExtent()
+        filter.scale = Float(scale.height)
+        filter.aspectRatio = Float(scale.width / scale.height)
+        guard let output = filter.outputImage else {
+            return image.transformed(by: CGAffineTransform(scaleX: scale.width, y: scale.height))
+        }
+        return output.cropped(to: CGRect(x: 0, y: 0, width: extent.width * scale.width, height: extent.height * scale.height))
     }
 
     static func roundedRect(_ rect: CGRect, radius: CGFloat, color: CIColor) -> CIImage {

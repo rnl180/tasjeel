@@ -77,17 +77,38 @@ public final class CaptureWriter: @unchecked Sendable {
     public func begin() throws {
         lock.lock()
         defer { lock.unlock() }
+        // Preferred: encode to a fixed picture quality. If this Mac's encoder
+        // cannot do that, fall back to a fixed data rate.
+        var attempt = try makeWriter(video: qualityVideoSettings())
+        if attempt == nil { attempt = try makeWriter(video: bitrateVideoSettings()) }
+        guard let (writer, video, system, mic) = attempt else {
+            throw RecorderError.writer("this Mac's video encoder refused the recording settings")
+        }
+        videoInput = video
+        systemInput = system
+        micInput = mic
+        self.writer = writer
+        writing = true
+    }
+
+    private typealias Inputs = (AVAssetWriter, AVAssetWriterInput, AVAssetWriterInput?, AVAssetWriterInput?)
+
+    /// Opens the file with the given video settings. Returns nil when the
+    /// encoder does not accept them, so the caller can try others.
+    private func makeWriter(video settings: [String: Any]) throws -> Inputs? {
         try? FileManager.default.removeItem(at: config.outputURL)
         let writer = try AVAssetWriter(outputURL: config.outputURL, fileType: .mov)
         // Flush to disk every few seconds: a crash or power cut then costs
         // seconds of the recording, not all of it.
         writer.movieFragmentInterval = CMTime(seconds: 5, preferredTimescale: 600)
 
-        let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings())
+        guard writer.canApply(outputSettings: settings, forMediaType: .video) else { return nil }
+        let video = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         video.expectsMediaDataInRealTime = true
+        guard writer.canAdd(video) else { return nil }
         writer.add(video)
-        videoInput = video
 
+        var system: AVAssetWriterInput?
         if config.systemAudio {
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -97,20 +118,21 @@ public final class CaptureWriter: @unchecked Sendable {
             ])
             input.expectsMediaDataInRealTime = true
             writer.add(input)
-            systemInput = input
+            system = input
         }
+        var mic: AVAssetWriterInput?
         if config.microphone {
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: microphoneSettings())
             input.expectsMediaDataInRealTime = true
             writer.add(input)
-            micInput = input
+            mic = input
         }
 
         guard writer.startWriting() else {
-            throw RecorderError.writer(writer.error?.localizedDescription ?? "unknown error")
+            writer.cancelWriting()
+            return nil
         }
-        self.writer = writer
-        writing = true
+        return (writer, video, system, mic)
     }
 
     // MARK: - Samples
@@ -210,20 +232,37 @@ public final class CaptureWriter: @unchecked Sendable {
 
     // MARK: - Settings
 
-    private func videoSettings() -> [String: Any] {
+    /// How close to the original each frame is kept, 0 ... 1. Measured on a
+    /// Retina screen full of text, 0.8 is indistinguishable from the screen
+    /// on every frame, including the first one after the picture changes.
+    private static let captureQuality = 0.8
+
+    /// HEVC at a fixed quality. A screen is still most of the time and then
+    /// changes all at once; a fixed data rate spreads its budget evenly, so
+    /// the first frames after every change come out soft and sharpen over the
+    /// next half second. A fixed quality spends what each frame needs: still
+    /// screens cost almost nothing and changes are sharp immediately.
+    private func qualityVideoSettings() -> [String: Any] {
+        settings(codec: .hevc, compression: [AVVideoQualityKey: Self.captureQuality])
+    }
+
+    private func bitrateVideoSettings() -> [String: Any] {
         // H.264 tops out around 4K; bigger displays (5K, 6K) need HEVC.
         let hevc = config.width > 4096 || config.height > 2304
         let pixels = Double(config.width * config.height)
-        let bitrate = Int(min(max(pixels * Double(config.fps) * 0.09, 4_000_000), 60_000_000))
-        var compression: [String: Any] = [
-            AVVideoAverageBitRateKey: hevc ? bitrate * 2 / 3 : bitrate,
-            AVVideoExpectedSourceFrameRateKey: config.fps,
-            AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
-            AVVideoAllowFrameReorderingKey: false,
-        ]
+        let bitrate = Int(min(max(pixels * Double(config.fps) * 0.2, 6_000_000), 80_000_000))
+        var compression: [String: Any] = [AVVideoAverageBitRateKey: hevc ? bitrate * 2 / 3 : bitrate]
         if !hevc { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
+        return settings(codec: hevc ? .hevc : .h264, compression: compression)
+    }
+
+    private func settings(codec: AVVideoCodecType, compression: [String: Any]) -> [String: Any] {
+        var compression = compression
+        compression[AVVideoExpectedSourceFrameRateKey] = config.fps
+        compression[AVVideoMaxKeyFrameIntervalDurationKey] = 2.0
+        compression[AVVideoAllowFrameReorderingKey] = false
         return [
-            AVVideoCodecKey: hevc ? AVVideoCodecType.hevc : AVVideoCodecType.h264,
+            AVVideoCodecKey: codec,
             AVVideoWidthKey: config.width,
             AVVideoHeightKey: config.height,
             AVVideoCompressionPropertiesKey: compression,

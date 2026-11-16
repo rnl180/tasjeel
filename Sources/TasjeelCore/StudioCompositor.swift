@@ -36,7 +36,22 @@ public final class StudioInstruction: NSObject, AVVideoCompositionInstructionPro
 /// AVFoundation calls this for every frame, during both playback and export.
 public final class StudioCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     private let queue = DispatchQueue(label: "tasjeel.compositor", qos: .userInteractive)
-    private let colorSpace = CGColorSpace(name: CGColorSpace.itur_709) ?? CGColorSpaceCreateDeviceRGB()
+    /// The colour space of the frames this compositor hands back.
+    ///
+    /// It has to be the one Core Video itself gives a frame tagged Rec. 709,
+    /// which is what the source frames arrive in. Core Graphics has a space of
+    /// the same name (`CGColorSpace.itur_709`) with a steeper tone curve;
+    /// rendering into that one brightens every dark colour and leaves the
+    /// picture looking washed out.
+    static let outputColorSpace: CGColorSpace = {
+        let tags: [CFString: Any] = [
+            kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+            kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+            kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+        ]
+        return CVImageBufferCreateColorSpaceFromAttachments(tags as CFDictionary)?.takeRetainedValue()
+            ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    }()
 
     private static let pixelAttributes: [String: any Sendable] = [
         kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA],
@@ -69,7 +84,7 @@ public final class StudioCompositor: NSObject, AVVideoCompositing, @unchecked Se
             let renderer = FrameRenderer.shared
             let image = renderer.render(screen: screen, camera: camera, sourceTime: sourceTime, canvas: canvas,
                                         screenSize: instruction.screenSize, edit: instruction.edit, caption: caption)
-            renderer.context.render(image, to: output, bounds: CGRect(origin: .zero, size: canvas), colorSpace: self.colorSpace)
+            renderer.context.render(image, to: output, bounds: CGRect(origin: .zero, size: canvas), colorSpace: Self.outputColorSpace)
             request.finish(withComposedVideoFrame: output)
         }
     }

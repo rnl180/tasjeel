@@ -75,6 +75,66 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --render <recording folder> --out <file> [--size 1920] [--fps 30] [--codec h264|hevc] [--frame <seconds>]`
+    ///
+    /// Renders a recording with its saved edit, exactly as the editor would.
+    /// With `--frame` it writes that one finished frame as a PNG; otherwise it
+    /// exports the whole video. `--size 0` keeps the recording's resolution.
+    static func render() {
+        let args = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let path = value("--render"), let out = value("--out") else {
+            print("FAIL usage: --render <recording folder> --out <file>")
+            exit(1)
+        }
+        Task {
+            do {
+                let directory = URL(fileURLWithPath: path, isDirectory: true)
+                let store = ProjectStore(root: directory.deletingLastPathComponent())
+                guard let entry = store.loadAll().first(where: { $0.directory.standardizedFileURL == directory.standardizedFileURL }) else {
+                    print("FAIL no recording in that folder")
+                    exit(1)
+                }
+                let recording = entry.recording
+                let longSide = value("--size").flatMap { Int($0) } ?? 0
+                let fps = value("--fps").flatMap { Int32($0) } ?? 30
+                let codec = value("--codec").flatMap { ExportCodec(rawValue: $0) } ?? .h264
+                let media = try await CompositionBuilder.load(recording: recording, directory: directory)
+                let size = CompositionBuilder.canvasSize(aspect: recording.edit.aspect, source: media.screenSize,
+                                                         longSide: longSide == 0 ? nil : longSide)
+                let captions = store.loadTranscript(in: directory)?.segments ?? []
+                let built = try CompositionBuilder.build(media: media, recording: recording, edit: recording.edit,
+                                                         renderSize: size, fps: fps, captions: captions)
+                let url = URL(fileURLWithPath: out)
+                let started = Date()
+                if let frame = value("--frame").flatMap({ Double($0) }) {
+                    let generator = AVAssetImageGenerator(asset: built.composition)
+                    generator.videoComposition = built.videoComposition
+                    generator.requestedTimeToleranceBefore = .zero
+                    generator.requestedTimeToleranceAfter = .zero
+                    let time = CMTime(seconds: built.timeMap.composition(fromSource: frame), preferredTimescale: 600)
+                    let image = try await generator.image(at: time).image
+                    guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+                        print("FAIL could not encode the frame")
+                        exit(1)
+                    }
+                    try png.write(to: url)
+                } else {
+                    try await Exporter.export(built, to: url, codec: codec) { _ in }
+                }
+                print("OK size=\(Int(size.width))x\(Int(size.height)) took=\(String(format: "%.1f", Date().timeIntervalSince(started)))s file=\(url.path)")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription) (\(error))")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

@@ -167,8 +167,7 @@ final class EditorModel: ObservableObject {
     /// Rebuilds the cut list. Needed when cuts or the canvas shape change.
     private func rebuild(keeping sourceTime: Double) throws {
         guard let media else { return }
-        let long = min(1920, Int(max(media.screenSize.width, media.screenSize.height)))
-        let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: long)
+        let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: previewLongSide)
         let built = try CompositionBuilder.build(media: media, recording: recording, edit: edit, renderSize: size, fps: 30,
                                                  captions: transcript?.segments ?? [])
         self.built = built
@@ -184,6 +183,41 @@ final class EditorModel: ObservableObject {
     }
 
     /// Applies look, camera, zoom and volume changes to the running preview.
+    // MARK: - Preview sharpness
+
+    /// Long side, in pixels, that preview frames are drawn at. It follows the
+    /// size of the preview on screen, so the picture is drawn once at exactly
+    /// the pixels it is shown on instead of being drawn small and stretched.
+    private var previewLongSide = 1920
+    private var previewResize: Task<Void, Never>?
+
+    /// Called by the preview whenever its size on screen changes.
+    func previewDidResize(pixels: CGSize) {
+        guard let media else { return }
+        let sourceLong = Int(max(media.screenSize.width, media.screenSize.height))
+        let wanted = Int(max(pixels.width, pixels.height).rounded(.up))
+        // Steps of 64 px keep a window drag from re-rendering at every size;
+        // never more pixels than the recording has.
+        let long = min(max((wanted + 63) / 64 * 64, 960), min(sourceLong, 3840))
+        guard long != previewLongSide else { return }
+        previewLongSide = long
+        previewResize?.cancel()
+        previewResize = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.applyPreviewSize()
+        }
+    }
+
+    private func applyPreviewSize() {
+        guard let media, let built, let item = player.currentItem else { return }
+        let size = CompositionBuilder.canvasSize(aspect: edit.aspect, source: media.screenSize, longSide: previewLongSide)
+        guard size != built.renderSize else { return }
+        let updated = CompositionBuilder.restyled(built, edit: edit, captions: transcript?.segments ?? [], renderSize: size)
+        self.built = updated
+        item.videoComposition = updated.videoComposition
+    }
+
     private func restyle() {
         guard let built, let item = player.currentItem else { return }
         let updated = CompositionBuilder.restyled(built, edit: edit, captions: transcript?.segments ?? [])

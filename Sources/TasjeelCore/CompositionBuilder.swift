@@ -158,10 +158,15 @@ public enum CompositionBuilder {
 
     /// Re-applies look, zoom, camera and volume changes without touching the
     /// cut list. Cheap enough to run on every slider tick.
-    public static func restyled(_ built: BuiltComposition, edit: EditState, captions: [TranscriptSegment] = []) -> BuiltComposition {
+    ///
+    /// Pass `renderSize` to also change the size frames are drawn at, which
+    /// the editor does to match the preview to the pixels it is shown on.
+    public static func restyled(_ built: BuiltComposition, edit: EditState, captions: [TranscriptSegment] = [],
+                                renderSize: CGSize? = nil) -> BuiltComposition {
+        let renderSize = renderSize ?? built.renderSize
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = StudioCompositor.self
-        video.renderSize = built.renderSize
+        video.renderSize = renderSize
         video.frameDuration = CMTime(value: 1, timescale: built.fps)
         video.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
         video.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
@@ -187,7 +192,7 @@ public enum CompositionBuilder {
         }
 
         return BuiltComposition(composition: built.composition, videoComposition: video, audioMix: mix,
-                                timeMap: built.timeMap, renderSize: built.renderSize, screenTrackID: built.screenTrackID,
+                                timeMap: built.timeMap, renderSize: renderSize, screenTrackID: built.screenTrackID,
                                 cameraTrackID: built.cameraTrackID, audioTrackIDs: built.audioTrackIDs,
                                 screenSize: built.screenSize, fps: built.fps)
     }

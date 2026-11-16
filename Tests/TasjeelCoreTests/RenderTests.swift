@@ -185,6 +185,68 @@ final class RenderTests: XCTestCase {
                                                           renderSize: CGSize(width: 320, height: 200)))
     }
 
+    /// A dark grey screen must come out of the editor the same dark grey.
+    /// (Rendering into the wrong Rec. 709 colour space once brightened every
+    /// dark colour by a third, which made exports look washed out.)
+    func testExportKeepsTheRecordingsColours() async throws {
+        let source = directory.appendingPathComponent(ProjectStore.screenName)
+        try await makeMovie(at: source, size: CGSize(width: 640, height: 400), seconds: 1, color: (60, 64, 70), audio: false)
+        let recording = Recording(title: "Colour", duration: 1, sourceName: "Test",
+                                  screen: MediaInfo(file: ProjectStore.screenName, width: 640, height: 400))
+        let media = try await CompositionBuilder.load(recording: recording, directory: directory)
+        let size = CompositionBuilder.canvasSize(aspect: .source, source: media.screenSize, longSide: nil)
+        XCTAssertEqual(size, CGSize(width: 640, height: 400), "full size by default")
+        let built = try CompositionBuilder.build(media: media, recording: recording, edit: recording.edit, renderSize: size)
+        let output = directory.appendingPathComponent("colour.mp4")
+        try await Exporter.export(built, to: output, codec: .h264) { _ in }
+
+        func middle(of url: URL) async throws -> (r: Int, g: Int, b: Int) {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            let image = try await generator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+            return rgb(of: image, at: CGPoint(x: 320, y: 200))
+        }
+        let before = try await middle(of: source)
+        let after = try await middle(of: output)
+        XCTAssertLessThanOrEqual(abs(before.r - after.r), 3, "red \(before.r) became \(after.r)")
+        XCTAssertLessThanOrEqual(abs(before.g - after.g), 3, "green \(before.g) became \(after.g)")
+        XCTAssertLessThanOrEqual(abs(before.b - after.b), 3, "blue \(before.b) became \(after.b)")
+    }
+
+    /// Fine detail (think small text) has to survive the renderer: untouched
+    /// at full size, and still clearly there when the picture is shrunk.
+    func testFineDetailStaysSharp() throws {
+        // Black and white stripes, 4 px wide.
+        let width = 640, height = 400
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0 ..< height {
+            for x in 0 ..< width where (x / 4) % 2 == 0 {
+                let i = (y * width + x) * 4
+                bytes[i] = 0
+                bytes[i + 1] = 0
+                bytes[i + 2] = 0
+            }
+        }
+        let screen = CIImage(bitmapData: Data(bytes), bytesPerRow: width * 4, size: CGSize(width: width, height: height),
+                             format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        let renderer = FrameRenderer()
+        var edit = EditState(duration: 1)
+        edit.applyPlainLook()
+
+        // Full size: every pixel passes straight through.
+        let full = renderer.render(screen: screen, camera: nil, sourceTime: 0, canvas: CGSize(width: width, height: height),
+                                   screenSize: CGSize(width: width, height: height), edit: edit)
+        XCTAssertLessThan(try pixel(of: full, at: CGPoint(x: 1, y: 200), renderer: renderer).r, 6)
+        XCTAssertGreaterThan(try pixel(of: full, at: CGPoint(x: 5, y: 200), renderer: renderer).r, 249)
+        XCTAssertLessThan(try pixel(of: full, at: CGPoint(x: 3, y: 200), renderer: renderer).r, 6, "no bleed at a stripe's edge")
+
+        // Half size: the stripes are 2 px wide and must still be black and white.
+        let half = renderer.render(screen: screen, camera: nil, sourceTime: 0, canvas: CGSize(width: width / 2, height: height / 2),
+                                   screenSize: CGSize(width: width, height: height), edit: edit)
+        let dark = try pixel(of: half, at: CGPoint(x: 0, y: 100), renderer: renderer).r
+        let light = try pixel(of: half, at: CGPoint(x: 2, y: 100), renderer: renderer).r
+        XCTAssertGreaterThan(light - dark, 200, "stripes keep their contrast when shrunk (\(dark) vs \(light))")
+    }
+
     // MARK: - Helpers
 
     private func pixel(of image: CIImage, at point: CGPoint, renderer: FrameRenderer) throws -> (r: Int, g: Int, b: Int) {

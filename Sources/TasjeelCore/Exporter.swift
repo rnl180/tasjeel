@@ -13,7 +13,7 @@ public struct ExportSettings: Equatable, Sendable {
     public var fps: Int
     public var codec: ExportCodec
 
-    public init(longSide: Int? = 1920, fps: Int = 30, codec: ExportCodec = .h264) {
+    public init(longSide: Int? = nil, fps: Int = 30, codec: ExportCodec = .h264) {
         self.longSide = longSide
         self.fps = fps
         self.codec = codec

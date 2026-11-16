@@ -159,7 +159,7 @@ private struct EditorTopBar: View {
 private struct ExportPanel: View {
     @ObservedObject var model: EditorModel
     @Binding var isPresented: Bool
-    @AppStorage("exportLongSide") private var longSide = 1920
+    @AppStorage("exportLongSide") private var longSide = 0
     @AppStorage("exportFPS") private var fps = 30
     @AppStorage("exportCodec") private var codec = ExportCodec.h264.rawValue
 
@@ -251,7 +251,7 @@ private struct PreviewArea: View {
                 }
                 .padding(40)
             } else if model.isReady {
-                PlayerSurface(player: model.player)
+                PlayerSurface(player: model.player) { model.previewDidResize(pixels: $0) }
                     .aspectRatio(model.canvasAspect, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.stroke))
@@ -312,15 +312,19 @@ private struct ToastStyle: ViewModifier {
 
 struct PlayerSurface: NSViewRepresentable {
     let player: AVPlayer
+    /// Reports the preview's size in real screen pixels whenever it changes.
+    var onPixelSize: ((CGSize) -> Void)?
 
     func makeNSView(context: Context) -> PlayerNSView {
         let view = PlayerNSView()
         view.playerLayer.player = player
+        view.onPixelSize = onPixelSize
         return view
     }
 
     func updateNSView(_ view: PlayerNSView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        view.onPixelSize = onPixelSize
     }
 }
 
@@ -340,12 +344,32 @@ final class PlayerNSView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    var onPixelSize: ((CGSize) -> Void)?
+    private var reportedSize = CGSize.zero
+
     override func layout() {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
         CATransaction.commit()
+        reportPixelSize()
+    }
+
+    /// Moving the window to a display with a different pixel density changes
+    /// how many pixels the preview covers without changing its size in points.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        reportPixelSize()
+    }
+
+    private func reportPixelSize() {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        playerLayer.contentsScale = scale
+        let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard size.width > 1, size.height > 1, size != reportedSize else { return }
+        reportedSize = size
+        onPixelSize?(size)
     }
 }
 

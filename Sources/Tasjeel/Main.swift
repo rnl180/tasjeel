@@ -10,6 +10,8 @@ enum Main {
             SelfTest.importVideo()
         } else if args.contains("--transcribe") {
             SelfTest.transcribe()
+        } else if args.contains("--render") {
+            SelfTest.render()
         } else {
             TasjeelApp.main()
         }

@@ -23,7 +23,9 @@ struct TasjeelApp: App {
                 Button("Open Recordings Folder") { app.revealLibraryFolder() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Divider()
-                Button("New Video from Storyboard…") { app.buildFromStoryboard() }
+                Button("New Video with AI…") { app.openStudio() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                Button("New Video from Storyboard File…") { app.buildFromStoryboard() }
             }
         }
 
@@ -104,6 +106,7 @@ struct MenuBarMenu: View {
             openWindow(id: "library")
             NSApp.activate(ignoringOtherApps: true)
         }
+        Button("Open Studio") { app.openStudio() }
         Button("Open Recordings Folder") { app.revealLibraryFolder() }
         Divider()
         Button("Quit Tasjeel") { NSApp.terminate(nil) }

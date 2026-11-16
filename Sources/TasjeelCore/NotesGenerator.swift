@@ -16,6 +16,37 @@ public protocol TextModel: Sendable {
     /// characters written so far.
     func generate(system: String, prompt: String, schema: String,
                   progress: @escaping @Sendable (Int) -> Void) async throws -> String
+    /// True when the model can look at pictures sent with a request.
+    var seesImages: Bool { get }
+    /// Answers `prompt` in free text, for a conversation rather than a form.
+    /// `images` are shown to models that can see and ignored by the rest.
+    /// `partial` receives the answer so far as it is written.
+    func write(system: String, prompt: String, images: [ModelImage],
+               partial: @escaping @Sendable (String) -> Void) async throws -> String
+}
+
+/// A picture sent to a model along with a request.
+public struct ModelImage: Equatable, Sendable {
+    /// "image/jpeg" or "image/png".
+    public var mediaType: String
+    public var data: Data
+
+    public init(mediaType: String, data: Data) {
+        self.mediaType = mediaType
+        self.data = data
+    }
+}
+
+public extension TextModel {
+    var seesImages: Bool { false }
+
+    /// Models with nothing special to offer answer in one piece, unseeing.
+    func write(system: String, prompt: String, images: [ModelImage],
+               partial: @escaping @Sendable (String) -> Void) async throws -> String {
+        let text = try await generate(system: system, prompt: prompt, schema: "") { _ in }
+        partial(text)
+        return text
+    }
 }
 
 public enum NotesError: LocalizedError, Equatable {

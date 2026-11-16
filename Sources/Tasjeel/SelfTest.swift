@@ -258,6 +258,85 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// `Tasjeel --studio <project folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>]`
+    ///
+    /// One turn of the Studio from a terminal: adds material, sends a message
+    /// to the model, saves the storyboard it writes, and optionally renders a
+    /// size. The folder is created if needed. For Claude the key is read from
+    /// the ANTHROPIC_API_KEY environment variable; it is never an argument.
+    static func studio() {
+        let args = CommandLine.arguments
+        func values(_ flag: String) -> [String] {
+            args.indices.filter { args[$0] == flag && $0 + 1 < args.count }.map { args[$0 + 1] }
+        }
+        guard let folder = values("--studio").first else {
+            print("FAIL usage: --studio <project folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>]")
+            exit(1)
+        }
+        Task {
+            do {
+                let workspace = StudioWorkspace(directory: URL(fileURLWithPath: folder, isDirectory: true))
+                try workspace.prepare()
+                var chat = workspace.loadChat()
+                for path in values("--add") {
+                    let material = try await workspace.addMaterial(from: URL(fileURLWithPath: path))
+                    chat.materials.append(material)
+                    print("added \(material.file) \(material.width)x\(material.height)\(material.seconds.map { " \($0)s" } ?? "")")
+                }
+                try workspace.save(chat)
+
+                if let message = values("--say").first {
+                    let model: any TextModel
+                    switch values("--engine").first ?? "claude" {
+                    case "ollama":
+                        let client = OllamaClient()
+                        let installed = try await client.models()
+                        guard let name = values("--model").first ?? installed.first else {
+                            print("FAIL Ollama has no models")
+                            exit(1)
+                        }
+                        model = OllamaModel(name: name, client: client)
+                    default:
+                        guard let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"], !key.isEmpty else {
+                            print("FAIL set ANTHROPIC_API_KEY to use Claude")
+                            exit(1)
+                        }
+                        model = ClaudeModel(apiKey: key)
+                    }
+                    chat.messages.append(StudioMessage(role: .user, text: message))
+                    let looks = model.seesImages ? await workspace.looks(at: chat.materials) : StudioWorkspace.Looks()
+                    let answer = try await StoryboardWriter.answer(messages: chat.messages, materials: chat.materials,
+                                                                   storyboard: workspace.loadStoryboard(), directory: workspace.directory,
+                                                                   model: model, looks: looks)
+                    chat.messages.append(StudioMessage(role: .assistant, text: answer.reply, storyboard: answer.storyboard,
+                                                       problems: answer.problems.isEmpty ? nil : answer.problems))
+                    if let text = answer.storyboard { try workspace.saveStoryboard(text) }
+                    try workspace.save(chat)
+                    print("engine: \(model.displayName) pictures=\(looks.images.count)")
+                    print("reply: \(answer.reply)")
+                    print("storyboard: \(answer.storyboard == nil ? "unchanged" : "saved")")
+                    for problem in answer.problems { print("problem: \(problem)") }
+                }
+
+                if let format = values("--render").first {
+                    let summary = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL)
+                    print("built scenes=\(summary.scenes) seconds=\(String(format: "%.1f", summary.seconds))")
+                    let url = try await StudioRenderer.render(project: workspace.videoURL, format: format,
+                                                              root: workspace.directory.deletingLastPathComponent()) { fraction, label in
+                        print("  \(fraction.map { String(format: "%3.0f%%", $0 * 100) } ?? "  …") \(label)")
+                    }
+                    print("rendered \(url.lastPathComponent)")
+                }
+                print("OK")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// `Tasjeel --selftest-record [seconds] [--mic] [--out <folder>]`
     ///
     /// Records the main display for a few seconds, pauses once in the middle,

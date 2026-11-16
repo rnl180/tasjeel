@@ -31,6 +31,29 @@ enum Theme {
     static let warn = Color(hex: 0xF5B546)
 }
 
+extension String {
+    /// True when the text starts in a right-to-left script (Arabic, Hebrew),
+    /// so it should be laid out from the right.
+    var readsRightToLeft: Bool {
+        for scalar in unicodeScalars {
+            switch scalar.value {
+            case 0x0590 ... 0x08FF, 0xFB1D ... 0xFDFF, 0xFE70 ... 0xFEFF:
+                return true
+            default:
+                if scalar.properties.isAlphabetic { return false }
+            }
+        }
+        return false
+    }
+}
+
+extension View {
+    /// Lays text out from whichever side its language reads from.
+    func reading(_ text: String) -> some View {
+        environment(\.layoutDirection, text.readsRightToLeft ? .rightToLeft : .leftToRight)
+    }
+}
+
 // MARK: - Formatting
 
 enum Format {

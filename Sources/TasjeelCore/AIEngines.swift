@@ -90,6 +90,20 @@ public enum AIEngines {
         }
     }
 
+    /// Decides which engine writes storyboards in the Studio. Writing a whole
+    /// video is more than the small model built into macOS can do, so it is
+    /// Claude when the user chose Claude, and otherwise a model in Ollama.
+    public static func chooseWriter(_ kind: AIEngineKind, ollamaModel: String, found: AIAvailability) -> AIChoice {
+        if kind == .claude { return choose(.claude, ollamaModel: ollamaModel, language: "en", found: found) }
+        if case .ollama(let model) = choose(.ollama, ollamaModel: ollamaModel, language: "en", found: found) {
+            return .ollama(model: model)
+        }
+        if kind == .ollama { return choose(.ollama, ollamaModel: ollamaModel, language: "en", found: found) }
+        return .unavailable(found.hasClaudeKey
+            ? "The Studio writes with Claude or with a model in Ollama. Choose one of them in AI settings."
+            : "The Studio writes with Claude (your own API key) or with a model in Ollama. Set one up in AI settings.")
+    }
+
     /// The installed model to prefer when the user has not picked one: the
     /// suggested one, else the first that is not an embedding model.
     static func preferred(_ models: [String]) -> String? {
@@ -252,11 +266,23 @@ public struct OllamaModel: TextModel {
 
     public func generate(system: String, prompt: String, schema: String,
                          progress: @escaping @Sendable (Int) -> Void) async throws -> String {
+        try await chat(system: system, prompt: prompt, schema: schema, temperature: 0.2) { progress($0.count) }
+    }
+
+    /// Free text for a conversation. Pictures are not sent: most local models
+    /// cannot see, and the ones that can each want them differently.
+    public func write(system: String, prompt: String, images: [ModelImage],
+                      partial: @escaping @Sendable (String) -> Void) async throws -> String {
+        try await chat(system: system, prompt: prompt, schema: "", temperature: 0.5, partial: partial)
+    }
+
+    private func chat(system: String, prompt: String, schema: String, temperature: Double,
+                      partial: @escaping @Sendable (String) -> Void) async throws -> String {
         var body: [String: Any] = [
             "model": name,
             "stream": true,
             "messages": [["role": "system", "content": system], ["role": "user", "content": prompt]],
-            "options": ["temperature": 0.2, "num_ctx": context],
+            "options": ["temperature": temperature, "num_ctx": context],
         ]
         if let format = try? JSONSerialization.jsonObject(with: Data(schema.utf8)) { body["format"] = format }
 
@@ -283,7 +309,7 @@ public struct OllamaModel: TextModel {
             }
             if let message = object["message"] as? [String: Any], let piece = message["content"] as? String, !piece.isEmpty {
                 text += piece
-                progress(text.count)
+                partial(text)
             }
         }
         guard status == 200 else { throw NotesError.engine("Ollama could not run \(name) (error \(status)).") }
@@ -314,12 +340,33 @@ public struct ClaudeModel: TextModel {
     public var transcriptBudget: Int { 1_200_000 }
     public var isCloud: Bool { true }
 
+    public var seesImages: Bool { true }
+
     public func generate(system: String, prompt: String, schema: String,
                          progress: @escaping @Sendable (Int) -> Void) async throws -> String {
         var output: [String: Any] = ["effort": "medium"]
         if let parsed = try? JSONSerialization.jsonObject(with: Data(schema.utf8)) {
             output["format"] = ["type": "json_schema", "schema": parsed]
         }
+        return try await run(system: system, content: prompt, output: output) { progress($0.count) }
+    }
+
+    /// Free text for a conversation, with the pictures placed before the
+    /// words. The instructions and the pictures are marked for caching: they
+    /// are the same on every turn of a chat, so later turns cost less.
+    public func write(system: String, prompt: String, images: [ModelImage],
+                      partial: @escaping @Sendable (String) -> Void) async throws -> String {
+        var blocks: [[String: Any]] = images.map {
+            ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
+        }
+        if !blocks.isEmpty { blocks[blocks.count - 1]["cache_control"] = ["type": "ephemeral"] }
+        blocks.append(["type": "text", "text": prompt])
+        let instructions: [[String: Any]] = [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]]]
+        return try await run(system: instructions, content: blocks, output: ["effort": "medium"], partial: partial)
+    }
+
+    private func run(system: Any, content: Any, output: [String: Any],
+                     partial: @escaping @Sendable (String) -> Void) async throws -> String {
         let body: [String: Any] = [
             "model": Self.model,
             "max_tokens": 64000,
@@ -328,7 +375,7 @@ public struct ClaudeModel: TextModel {
             // the model Anthropic recommends instead of failing.
             "fallbacks": "default",
             "system": system,
-            "messages": [["role": "user", "content": prompt]],
+            "messages": [["role": "user", "content": content]],
             "output_config": output,
         ]
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/messages"))
@@ -345,11 +392,13 @@ public struct ClaudeModel: TextModel {
             try Task.checkCancellation()
             if attempt > 0 { try await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000) }
             do {
-                return try await send(request, progress: progress)
+                return try await send(request, partial: partial)
             } catch let failure as Failure {
                 lastError = NotesError.engine(failure.message)
                 if !failure.retryable { break }
-            } catch let error as URLError where error.code != .cancelled {
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
+            } catch let error as URLError {
                 lastError = NotesError.engine("Claude could not be reached: \(error.localizedDescription)")
             }
         }
@@ -361,7 +410,7 @@ public struct ClaudeModel: TextModel {
         var retryable: Bool
     }
 
-    private func send(_ request: URLRequest, progress: @escaping @Sendable (Int) -> Void) async throws -> String {
+    private func send(_ request: URLRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
@@ -384,7 +433,7 @@ public struct ClaudeModel: TextModel {
                 if let delta = event["delta"] as? [String: Any], delta["type"] as? String == "text_delta",
                    let piece = delta["text"] as? String {
                     text += piece
-                    progress(text.count)
+                    partial(text)
                 }
             case "message_delta":
                 if let delta = event["delta"] as? [String: Any], let reason = delta["stop_reason"] as? String { stopReason = reason }
@@ -401,7 +450,7 @@ public struct ClaudeModel: TextModel {
         case "refusal":
             throw NotesError.declined
         case "max_tokens":
-            throw NotesError.engine("Claude ran out of room before finishing the notes. Try again.")
+            throw NotesError.engine("Claude ran out of room before it finished. Try again.")
         default:
             return text
         }

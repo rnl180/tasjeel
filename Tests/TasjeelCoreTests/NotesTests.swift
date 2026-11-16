@@ -362,7 +362,7 @@ private final class Counter: @unchecked Sendable {
 }
 
 /// A one-request-per-connection HTTP server on a random local port.
-private final class StubServer: @unchecked Sendable {
+final class StubServer: @unchecked Sendable {
     struct Request {
         var path: String
         var headers: [String: String]

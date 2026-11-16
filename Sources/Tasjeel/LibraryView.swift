@@ -315,6 +315,11 @@ struct LibraryGrid: View {
             .frame(height: 30)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.stroke))
+            Button { app.openStudio() } label: {
+                Label("Studio", systemImage: "sparkles.rectangle.stack")
+            }
+            .buttonStyle(QuietButtonStyle())
+            .help("Make a marketing video by describing it to an AI model")
             IconButton(symbol: "square.and.arrow.down", help: "Import a video file to edit") { app.importVideo() }
             IconButton(symbol: "folder", help: "Open the recordings folder") { app.revealLibraryFolder() }
         }

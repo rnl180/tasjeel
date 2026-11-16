@@ -208,6 +208,133 @@ public enum Storyboard {
     }
 }
 
+// MARK: - Looking at a storyboard
+
+public extension Storyboard {
+    /// A storyboard reduced to what a person wants to see of it: one line or
+    /// two per scene, how long it is, and which picture or clip it shows.
+    struct Outline: Equatable, Sendable {
+        public struct Scene: Equatable, Identifiable, Sendable {
+            /// Position in the storyboard, from 0.
+            public var id: Int
+            public var type: String
+            /// "Opening line", "Recording", ...
+            public var label: String
+            public var text: String
+            public var detail: String?
+            public var seconds: Double
+            /// The picture or clip the scene shows, and where in a clip it starts.
+            public var media: URL?
+            public var start: Double?
+        }
+
+        public var title: String
+        public var language: String
+        public var rightToLeft: Bool
+        public var formats: [String]
+        public var seconds: Double
+        public var background: String
+        public var text: String
+        public var accent: String
+        public var logo: URL?
+        public var scenes: [Scene]
+    }
+
+    static let sceneLabels = ["hook": "Opening line", "screen": "Recording", "feature": "Feature",
+                              "quote": "Quote", "numbers": "Figures", "cta": "Call to action"]
+
+    static func outline(of plan: Plan) -> Outline {
+        let board = plan.storyboard
+        let brand = board["brand"] as? [String: Any] ?? [:]
+        let pictures = Dictionary(plan.copies.map { ($0.path, $0.source) }, uniquingKeysWith: { first, _ in first })
+        let clips = Dictionary(plan.clips.map { ($0.scene, $0) }, uniquingKeysWith: { first, _ in first })
+        let rawScenes = board["scenes"] as? [[String: Any]] ?? []
+
+        let scenes = rawScenes.enumerated().map { index, scene -> Outline.Scene in
+            let type = scene["type"] as? String ?? ""
+            func text(_ key: String) -> String? { scene[key] as? String }
+            var main = "", detail: String?, media: URL?, start: Double?
+            switch type {
+            case "hook":
+                main = text("text") ?? ""
+                detail = text("kicker")
+            case "screen":
+                main = text("caption") ?? "A piece of \(clips[index]?.source.lastPathComponent ?? "a recording")"
+                media = clips[index]?.source
+                start = clips[index]?.start
+                if let clip = clips[index] { detail = "\(clip.source.lastPathComponent), from \(NotesFormat.stamp(clip.start))" }
+            case "feature":
+                main = text("headline") ?? ""
+                let points = scene["points"] as? [String] ?? []
+                detail = points.isEmpty ? nil : points.joined(separator: " · ")
+                media = text("image").flatMap { pictures[$0] }
+            case "quote":
+                main = "“\(text("quote") ?? "")”"
+                detail = [text("name"), text("role")].compactMap { $0 }.joined(separator: ", ")
+            case "numbers":
+                let items = scene["items"] as? [[String: Any]] ?? []
+                main = items.map { item in
+                    let value = (item["value"] as? NSNumber)?.doubleValue ?? 0
+                    let number = value == value.rounded() ? String(Int(value)) : String(value)
+                    let figure = "\(item["prefix"] as? String ?? "")\(number)\(item["suffix"] as? String ?? "")"
+                    let label = item["label"] as? String ?? ""
+                    return label.isEmpty ? figure : "\(figure) \(label)"
+                }.joined(separator: " · ")
+                detail = text("headline")
+            default:
+                main = text("text") ?? ""
+                detail = text("link")
+            }
+            if detail?.isEmpty == true { detail = nil }
+            return Outline.Scene(id: index, type: type, label: sceneLabels[type] ?? type, text: main, detail: detail,
+                                 seconds: (scene["seconds"] as? NSNumber)?.doubleValue ?? 0, media: media, start: start)
+        }
+        return Outline(title: board["title"] as? String ?? "Untitled video", language: board["language"] as? String ?? "en",
+                       rightToLeft: board["rightToLeft"] as? Bool ?? false, formats: board["formats"] as? [String] ?? formats,
+                       seconds: plan.duration, background: brand["background"] as? String ?? "#0C0D11",
+                       text: brand["text"] as? String ?? "#FFFFFF", accent: brand["accent"] as? String ?? "#8F7CFF",
+                       logo: (brand["logo"] as? String).flatMap { pictures[$0] }, scenes: scenes)
+    }
+
+    /// A storyboard written out the way a person would: title first, each
+    /// scene starting with its type, and the rest in a steady order.
+    static func text(for storyboard: [String: Any]) -> String {
+        let order = ["version", "title", "language", "formats", "fps", "brand", "scenes",
+                     "type", "seconds", "kicker", "text", "video", "start", "caption", "sound", "headline", "points", "image",
+                     "quote", "name", "role", "items", "value", "prefix", "suffix", "label", "link",
+                     "logo", "background", "accent", "font"]
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+
+        func leaf(_ value: Any) -> String {
+            let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .withoutEscapingSlashes])
+            return data.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+        }
+        func write(_ value: Any, indent: String) -> String {
+            let inner = indent + "  "
+            if let object = value as? [String: Any] {
+                if object.isEmpty { return "{}" }
+                let keys = object.keys.sorted { (rank[$0] ?? order.count, $0) < (rank[$1] ?? order.count, $1) }
+                // Small groups of plain values (a figure, a brand) read better on one line.
+                let plain = object.values.allSatisfy { !($0 is [Any]) && !($0 is [String: Any]) }
+                if plain, !indent.isEmpty {
+                    let line = "{ " + keys.map { "\(leaf($0)): \(leaf(object[$0]!))" }.joined(separator: ", ") + " }"
+                    if line.count + indent.count <= 100 { return line }
+                }
+                return "{\n" + keys.map { "\(inner)\(leaf($0)): \(write(object[$0]!, indent: inner))" }.joined(separator: ",\n") + "\n\(indent)}"
+            }
+            if let list = value as? [Any] {
+                if list.isEmpty { return "[]" }
+                if list.allSatisfy({ $0 is String }), list.count <= 3, list.map({ ($0 as? String)?.count ?? 0 }).reduce(0, +) < 40 {
+                    return "[" + list.map(leaf).joined(separator: ", ") + "]"
+                }
+                return "[\n" + list.map { inner + write($0, indent: inner) }.joined(separator: ",\n") + "\n\(indent)]"
+            }
+            return leaf(value)
+        }
+        return write(storyboard, indent: "") + "\n"
+    }
+}
+
 // MARK: - Reading fields
 
 /// Collects problems as they are found, so the user sees all of them at once.

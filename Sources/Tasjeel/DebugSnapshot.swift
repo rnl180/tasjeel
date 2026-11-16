@@ -46,6 +46,44 @@ enum DebugSnapshot {
                 window.close()
             }
 
+            // TASJEEL_SNAPSHOT_STUDIO=<project folder> pictures the Studio
+            // window on that project. TASJEEL_SNAPSHOT_STUDIO_SAY=<message>
+            // sends a message through the chat first, and
+            // TASJEEL_SNAPSHOT_STUDIO_RENDER=1 presses Create Video.
+            if let folder = env["TASJEEL_SNAPSHOT_STUDIO"] {
+                await AIConfig.shared.refresh()
+                StudioWindow.shared.open(project: URL(fileURLWithPath: folder, isDirectory: true))
+                if let studio = StudioWindow.shared.model {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    write(windowMatching: "studio", to: directory.appendingPathComponent("studio-start.png"))
+                    if let message = env["TASJEEL_SNAPSHOT_STUDIO_SAY"] {
+                        studio.draft = message
+                        studio.send()
+                        var waited = 0.0
+                        while studio.writing != nil, waited < 300 {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            waited += 0.1
+                        }
+                        print("studio: messages=\(studio.messages.count) scenes=\(studio.outline?.scenes.count ?? -1) problems=\(studio.messages.last?.problems?.count ?? 0) error=\(studio.chatError ?? "none")")
+                    }
+                    if env["TASJEEL_SNAPSHOT_STUDIO_RENDER"] != nil {
+                        studio.createVideo()
+                        if studio.askDownload {
+                            studio.askDownload = false
+                            studio.startRender()
+                        }
+                        var waited = 0.0
+                        while studio.render != nil, waited < 900 {
+                            try? await Task.sleep(nanoseconds: 200_000_000)
+                            waited += 0.2
+                        }
+                        print("studio: video=\(studio.videoURL?.lastPathComponent ?? "none") stale=\(studio.videoIsStale) error=\(studio.renderError ?? "none")")
+                    }
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    write(windowMatching: "studio", to: directory.appendingPathComponent("studio.png"))
+                }
+            }
+
             let tabs = (env["TASJEEL_SNAPSHOT_EDITOR"] ?? "").split(separator: ",").map(String.init)
             if !tabs.isEmpty, let entry = AppState.shared.items.first {
                 AppState.shared.open(entry)

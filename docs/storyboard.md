@@ -4,10 +4,12 @@ A storyboard is a marketing video written down as a list of scenes. Tasjeel turn
 
 A complete example is in [`Examples/studio`](../Examples/studio).
 
+You do not have to write one by hand: in the [Studio](studio.md) an AI model writes and revises the storyboard from a chat. This page is the format it writes, for when you want to read or edit the file yourself.
+
 ## Make a video
 
 1. Write a storyboard file (below) and put the pictures and clips it mentions in the same folder.
-2. In Tasjeel choose **File › New Video from Storyboard…**, pick the file, and choose where the project should go.
+2. In Tasjeel choose **File › New Video from Storyboard File…**, pick the file, and choose where the project should go.
 3. In the project folder, double-click **Start** to preview and **Render** to make the videos. This part needs [Node.js](https://nodejs.org).
 
 To change the video, edit the storyboard and build it into the same folder again.

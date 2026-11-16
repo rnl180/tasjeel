@@ -59,23 +59,9 @@ public enum StudioProject {
 
         // Clips are checked before anything is written, so a storyboard with
         // a problem leaves no half-built folder behind.
-        var problems: [String] = []
-        var assets: [AVURLAsset] = []
-        for clip in plan.clips {
-            let asset = AVURLAsset(url: clip.source)
-            assets.append(asset)
-            let number = clip.scene + 1
-            guard let length = try? await asset.load(.duration).seconds,
-                  let tracks = try? await asset.loadTracks(withMediaType: .video), !tracks.isEmpty else {
-                problems.append("Scene \(number) (screen): \"\(clip.source.lastPathComponent)\" could not be opened as a video.")
-                continue
-            }
-            if clip.start + clip.seconds > length + 0.05 {
-                let from = clip.start > 0 ? " starting at \(format(clip.start)) s" : ""
-                problems.append("Scene \(number) (screen): the scene lasts \(format(clip.seconds)) s\(from), but \"\(clip.source.lastPathComponent)\" is only \(format(length)) s long. Shorten \"seconds\" or lower \"start\".")
-            }
-        }
+        let problems = await clipProblems(in: plan)
         guard problems.isEmpty else { throw StoryboardError.invalid(problems) }
+        let assets = plan.clips.map { AVURLAsset(url: $0.source) }
 
         let fresh = !FileManager.default.fileExists(atPath: directory.appendingPathComponent("package.json").path)
         let media = directory.appendingPathComponent(mediaFolder)
@@ -106,6 +92,26 @@ public enum StudioProject {
 
         return Summary(directory: directory, created: fresh, title: title, scenes: plan.sceneCount, seconds: plan.duration,
                        formats: plan.storyboard["formats"] as? [String] ?? [])
+    }
+
+    /// What is wrong with the clips a storyboard uses: one that cannot be
+    /// opened, or a scene that runs past the end of its clip.
+    public static func clipProblems(in plan: Storyboard.Plan) async -> [String] {
+        var problems: [String] = []
+        for clip in plan.clips {
+            let asset = AVURLAsset(url: clip.source)
+            let number = clip.scene + 1
+            guard let length = try? await asset.load(.duration).seconds,
+                  let tracks = try? await asset.loadTracks(withMediaType: .video), !tracks.isEmpty else {
+                problems.append("Scene \(number) (screen): \"\(clip.source.lastPathComponent)\" could not be opened as a video.")
+                continue
+            }
+            if clip.start + clip.seconds > length + 0.05 {
+                let from = clip.start > 0 ? " starting at \(format(clip.start)) s" : ""
+                problems.append("Scene \(number) (screen): the scene lasts \(format(clip.seconds)) s\(from), but \"\(clip.source.lastPathComponent)\" is only \(format(length)) s long. Shorten \"seconds\" or lower \"start\".")
+            }
+        }
+        return problems
     }
 
     /// Cuts out the part of a clip a scene uses and saves it as H.264, which

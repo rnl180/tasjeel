@@ -58,9 +58,17 @@ A screen recorder and video editor for the Mac that keeps everything on your mac
 - Exporting again refreshes the video and its data and keeps your changes to the code
 - Works right to left for Arabic
 
-**Marketing videos from a storyboard** (optional, needs Node.js)
+**Studio: marketing videos from a chat** (optional, needs Node.js and Claude or Ollama)
 
-- Write a video down as a list of scenes and Tasjeel builds it: **File › New Video from Storyboard…**
+- Say what the video is for, add screenshots, a logo or recordings, and an AI model writes the video scene by scene. Ask for changes until it is right
+- Watch it inside the app in wide, square and tall; every earlier version can be brought back
+- Claude (your own API key) sees the pictures you add; a model in Ollama keeps everything on your Mac
+- The model may use only what you gave it and may not invent quotes or figures, and every storyboard is checked before it is used
+- How it works and what is sent where: [docs/studio.md](docs/studio.md)
+
+**Marketing videos from a storyboard file** (optional, needs Node.js)
+
+- Or write the list of scenes yourself and Tasjeel builds it: **File › New Video from Storyboard File…**
 - Six kinds of scene: an opening line, a piece of a recording, a feature with points, a customer quote, figures that count up, and a closing call to action
 - One brand kit (logo, colours, font) applies to every scene
 - Renders wide (16:9), square and tall (9:16) from the same storyboard, left to right or right to left
@@ -162,6 +170,9 @@ A Swift package with two targets and no third-party dependencies:
 | `RemotionProject.swift` | Writes a recording out as a Remotion project |
 | `Storyboard.swift` | Checks a storyboard and fills in its defaults |
 | `StudioProject.swift` | Builds a video project from a storyboard, trimming clips to what each scene uses |
+| `StudioWorkspace.swift` | A Studio project on disk: chat, materials, and the small pictures shown to a model |
+| `StoryboardWriter.swift` | Turns a chat into a checked storyboard: the instructions, reading the answer, sending faults back |
+| `StudioRenderer.swift` | Finds Node.js, keeps one shared copy of Remotion, and renders a size |
 | `RemotionTemplate.swift` | Both projects' files, generated from the folders in `Templates` |
 
 ### Development
@@ -181,6 +192,7 @@ A few aids for working on the app, none of which are needed for normal use:
 - `Tasjeel --notes <recording folder> --engine ollama` writes AI notes from a saved transcript and prints them. `TASJEEL_OLLAMA_URL` points the app at an Ollama on another address.
 - `Tasjeel --remotion <recording folder> --out <project folder>` exports a Remotion project.
 - `Tasjeel --storyboard Examples/studio/storyboard.json --out <project folder>` builds a video project from a storyboard.
+- `Tasjeel --studio <project folder> --add shot.png --say "A launch video for…" --engine ollama --render wide` runs one turn of the Studio: adds material, asks the model, saves the storyboard, renders a size. With `--engine claude` the key is read from `ANTHROPIC_API_KEY`. `TASJEEL_STUDIO=/some/folder` moves the Studio's projects there.
 - `Tasjeel --render <recording folder> --out out.mp4` exports a recording with its saved edit. Add `--frame 6` and a `.png` name to write one finished frame instead, which is the quickest way to check sharpness and colour.
 - `TASJEEL_SNAPSHOT=/some/folder` makes the app save pictures of its own windows there and quit (see `DebugSnapshot.swift`).
 
@@ -205,12 +217,14 @@ A few aids for working on the app, none of which are needed for normal use:
 - The model built into macOS needs Apple Intelligence switched on, knows fewer languages (no Arabic at the time of writing) and reads only a few pages at a time, so long meetings are summarised in parts.
 - For Ollama, AI settings offers to download `gemma4:12b` (about 8 GB), which handles many languages. Any model you already have works too.
 - Notes are written from the transcript, so a misheard word can end up in them. Treat them as a draft.
+- The Studio uses the same key and the same model. It sends more than the notes do (your chat and small copies of the pictures you add); [docs/studio.md](docs/studio.md) lists exactly what.
 - The tests cover this with a scripted model and local stand-in servers. No real model runs in the test suite.
 
 ## Not there yet
 
 - Editing the transcript, and cutting the video by deleting text
 - Asking questions about a recording, and letting the AI make the cuts
+- Voiceover and music in Studio videos, and publishing them
 - Recording a connected iPhone or iPad
 - GIF export
 - Cursor smoothing and click highlights
@@ -218,7 +232,7 @@ A few aids for working on the app, none of which are needed for normal use:
 
 ## Plans
 
-- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. The first of five phases is built (storyboards, above); the chat, voiceover and publishing are still proposals.
+- [Marketing Video Studio](docs/plans/marketing-video-studio.md): describe a video in a chat, add your material, and get a finished marketing video with voiceover and versions for each social network. Two of five phases are built (storyboards and the Studio chat, above); voiceover, music and publishing are still proposals.
 
 ## License
 

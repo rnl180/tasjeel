@@ -777,6 +777,10 @@ stop() {
 
 command -v npm >/dev/null 2>&1 || stop "Node.js is needed to run Remotion. Install it from https://nodejs.org, then double-click Start again."
 
+# Tasjeel links this to its shared copy of Remotion; the link breaks if the
+# folder is moved. Remove a broken one so Remotion is installed here instead.
+if [ -L node_modules ] && [ ! -e node_modules ]; then rm node_modules; fi
+
 if [ ! -d node_modules ]; then
     echo "Installing Remotion (first time only, a few minutes)…"
     npm install --no-audit --no-fund || stop "The install did not finish. Check your internet connection and double-click Start again."

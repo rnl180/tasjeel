@@ -146,6 +146,11 @@ final class AppState: ObservableObject {
 
     /// Builds a marketing video project from a storyboard file: choose the
     /// storyboard, choose where the project goes, and it opens in Finder.
+    /// Opens the Studio, where a chat with an AI model writes the video.
+    func openStudio() {
+        StudioWindow.shared.open()
+    }
+
     func buildFromStoryboard() {
         let open = NSOpenPanel()
         open.allowedContentTypes = [.json]

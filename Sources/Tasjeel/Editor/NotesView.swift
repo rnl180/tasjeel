@@ -393,7 +393,7 @@ struct AISettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("AI settings").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("Choose what writes your notes. Only Claude sends anything off this Mac, and only the transcript text.")
+                Text("Choose what writes your notes and, in the Studio, your storyboards. Only Claude sends anything off this Mac.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.subtext)
                     .fixedSize(horizontal: false, vertical: true)
@@ -401,7 +401,7 @@ struct AISettingsView: View {
 
             VStack(spacing: 8) {
                 option(.automatic, title: "Automatic", badge: "On this Mac",
-                       detail: "Uses Apple Intelligence when it knows the language, otherwise a model in Ollama. Never uses the cloud.") { EmptyView() }
+                       detail: "Uses Apple Intelligence when it knows the language, otherwise a model in Ollama. Never uses the cloud. The Studio needs Ollama or Claude.") { EmptyView() }
 
                 option(.apple, title: "Apple Intelligence", badge: "On this Mac",
                        detail: ai.found.appleProblem ?? "Ready. Built into macOS, best for short recordings.",
@@ -411,7 +411,7 @@ struct AISettingsView: View {
                        warning: ai.checked && (!ai.found.ollamaRunning || ai.found.ollamaModels.isEmpty)) { ollamaControls }
 
                 option(.claude, title: "Claude", badge: "Cloud, your API key",
-                       detail: "The best notes, in any language, however long the meeting. Sends the transcript text to Anthropic; audio and video stay on your Mac. Anthropic bills your key for each use.") { claudeControls }
+                       detail: "The best results, in any language. For notes it sends the transcript text to Anthropic. In the Studio it sends your chat, the storyboard and small copies of the pictures you add, with a few frames of each video. Recordings themselves stay on your Mac. Anthropic bills your key for each use.") { claudeControls }
             }
 
             HStack {

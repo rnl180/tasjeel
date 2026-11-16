@@ -1297,7 +1297,12 @@ const Figure: React.FC<{ item: NumberItem; index: number; size: number }> = ({ i
         style={{ fontSize: size, fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "pre" }}
       >
         <span style={{ color: brand.accent }}>{item.prefix}</span>
-        {counted.toFixed(decimals)}
+        {counted.toLocaleString("en-US", {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+          // 12,000 but 2026: four digits are as often a year as a count.
+          useGrouping: Math.abs(item.value) >= 10000,
+        })}
         <span style={{ color: brand.accent }}>{item.suffix}</span>
       </div>
       {item.label ? (

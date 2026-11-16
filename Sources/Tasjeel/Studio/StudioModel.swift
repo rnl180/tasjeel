@@ -3,16 +3,23 @@ import AVFoundation
 import SwiftUI
 import TasjeelCore
 
-/// The Studio window's state: one project's chat, materials, storyboard and
-/// rendered video.
+/// The Studio window's state: one project (its memory and shared assets) and
+/// one of its videos (chat, storyboard, rendered video).
 @MainActor
 final class StudioModel: ObservableObject {
     let root: URL
     let ai = AIConfig.shared
     let player = AVPlayer()
 
+    // Project
+    @Published private(set) var project: ProjectFolder
+    @Published private(set) var memory: ProjectMemory
+    @Published private(set) var projects: [Entry] = []
+    @Published var showingProject = false
+
+    // Video
     @Published private(set) var workspace: StudioWorkspace
-    @Published private(set) var projects: [Project] = []
+    @Published private(set) var videos: [Entry] = []
 
     // Chat
     @Published private(set) var messages: [StudioMessage] = []
@@ -21,7 +28,7 @@ final class StudioModel: ObservableObject {
     @Published private(set) var writing: Writing?
     @Published var chatError: String?
 
-    // Materials
+    // Materials: the project's assets
     @Published private(set) var materials: [StudioMaterial] = []
     @Published private(set) var addingMaterials = false
     @Published var materialError: String?
@@ -33,7 +40,7 @@ final class StudioModel: ObservableObject {
     /// into something Tasjeel cannot build.
     @Published private(set) var storyboardProblems: [String] = []
 
-    // Video
+    // Rendered video
     @Published var format = "wide" { didSet { if format != oldValue { refreshVideo() } } }
     @Published private(set) var render: RenderJob?
     @Published var renderError: String?
@@ -44,10 +51,11 @@ final class StudioModel: ObservableObject {
     @Published var askDownload = false
     private var formatsToRender: [String] = []
 
-    struct Project: Identifiable, Equatable {
-        var workspace: StudioWorkspace
+    /// A project or a video in a menu.
+    struct Entry: Identifiable, Equatable {
+        var directory: URL
         var title: String
-        var id: URL { workspace.directory }
+        var id: String { directory.resolvingSymlinksInPath().path }
     }
 
     struct Writing: Equatable {
@@ -64,25 +72,49 @@ final class StudioModel: ObservableObject {
     private var renderTask: Task<Void, Never>?
     private var loadedVideo: (url: URL, date: Date)?
 
+    /// Opens the video in `directory` when it is one, otherwise the project
+    /// worked on most recently, making a first project if there is none.
     init(root: URL = StudioWorkspace.defaultRoot, opening directory: URL? = nil) {
         self.root = root
+        ProjectFolder.adoptLooseVideos(in: root)
+
+        var chosen: (ProjectFolder, StudioWorkspace)?
         if let directory {
-            workspace = StudioWorkspace(directory: directory)
-        } else if let recent = StudioWorkspace.all(in: root).first {
-            workspace = recent
-        } else {
-            workspace = StudioWorkspace(directory: root.appendingPathComponent("Video", isDirectory: true))
+            let video = StudioWorkspace(directory: directory)
+            if let project = video.project { chosen = (project, video) }
         }
+        var isFirst = false
+        if chosen == nil {
+            let project: ProjectFolder
+            if let recent = ProjectFolder.all(in: root).first {
+                project = recent
+            } else if let made = try? ProjectFolder.create(named: "My Project", in: root) {
+                project = made
+                isFirst = true
+            } else {
+                project = ProjectFolder(directory: root.appendingPathComponent("My Project", isDirectory: true))
+            }
+            let video = project.videos().first ?? (try? project.newVideo()) ?? StudioWorkspace(directory: project.videosURL.appendingPathComponent("Video"))
+            chosen = (project, video)
+        }
+        project = chosen!.0
+        workspace = chosen!.1
+        memory = chosen!.0.loadMemory()
         try? workspace.prepare()
         load()
+        // A brand-new project starts by saying what it is.
+        showingProject = isFirst && !DebugSnapshot.isActive
     }
 
     var title: String { outline?.title ?? workspace.name }
     var isBusy: Bool { writing != nil }
+    /// Where the files a storyboard names are found.
+    var baseDirectory: URL { workspace.baseDirectory }
 
-    // MARK: - Projects
+    // MARK: - Projects and videos
 
     private func load() {
+        memory = project.loadMemory()
         let chat = workspace.loadChat()
         messages = chat.messages
         materials = chat.materials
@@ -91,26 +123,21 @@ final class StudioModel: ObservableObject {
         materialError = nil
         renderError = nil
         reloadStoryboard()
-        reloadProjects()
+        reloadLists()
     }
 
-    private func reloadProjects() {
-        projects = StudioWorkspace.all(in: root).map { workspace in
-            var title = workspace.name
-            if let text = workspace.loadStoryboard(), let data = text.data(using: .utf8),
-               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let name = object["title"] as? String, !name.isEmpty {
-                title = name
-            }
-            return Project(workspace: workspace, title: title)
+    private func reloadLists() {
+        projects = ProjectFolder.all(in: root).map { Entry(directory: $0.directory, title: $0.loadMemory().name) }
+        videos = project.videos().map { video in
+            Entry(directory: video.directory, title: ProjectBrief.Video(video).title ?? video.name)
         }
     }
 
-    func open(_ project: StudioWorkspace) {
-        guard project != workspace else { return }
+    private func show(_ project: ProjectFolder, _ video: StudioWorkspace) {
         stopEverything()
-        workspace = project
-        try? project.prepare()
+        self.project = project
+        workspace = video
+        try? video.prepare()
         storyboard = nil
         outline = nil
         storyboardProblems = []
@@ -119,9 +146,29 @@ final class StudioModel: ObservableObject {
         load()
     }
 
+    func open(project directory: URL) {
+        let next = ProjectFolder(directory: directory)
+        guard next != project, next.exists else { return }
+        guard let video = next.videos().first ?? (try? next.newVideo()) else { return }
+        show(next, video)
+    }
+
+    func open(video directory: URL) {
+        let next = StudioWorkspace(directory: directory)
+        guard next != workspace, let owner = next.project else { return }
+        show(owner, next)
+    }
+
+    /// Makes a project and opens its memory, to be filled in.
     func newProject() {
-        guard let created = try? StudioWorkspace.create(in: root) else { return }
-        open(created)
+        guard let made = try? ProjectFolder.create(named: "New Project", in: root), let video = try? made.newVideo() else { return }
+        show(made, video)
+        showingProject = true
+    }
+
+    func newVideo() {
+        guard let made = try? project.newVideo() else { return }
+        show(project, made)
     }
 
     func close() {
@@ -139,6 +186,39 @@ final class StudioModel: ObservableObject {
 
     private func saveChat() {
         try? workspace.save(StudioChat(messages: messages, materials: materials))
+    }
+
+    // MARK: - Memory
+
+    func save(_ changed: ProjectMemory) {
+        var changed = changed
+        changed.name = changed.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if changed.name.isEmpty { changed.name = memory.name }
+        memory = changed
+        try? project.save(changed)
+        reloadLists()
+    }
+
+    func forget(_ learned: ProjectMemory.Learned) {
+        var changed = memory
+        changed.learned.removeAll { $0.id == learned.id }
+        save(changed)
+    }
+
+    /// The brief, brought up to date, as text.
+    func briefText() -> String {
+        try? project.writeBrief()
+        return (try? String(contentsOf: project.briefURL, encoding: .utf8)) ?? ""
+    }
+
+    func copyBrief() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(briefText(), forType: .string)
+    }
+
+    func revealBrief() {
+        try? project.writeBrief()
+        NSWorkspace.shared.activateFileViewerSelecting([project.briefURL])
     }
 
     // MARK: - Chat
@@ -180,11 +260,13 @@ final class StudioModel: ObservableObject {
         chatError = nil
         writing = Writing(text: "", engine: model.displayName)
         let workspace = workspace, messages = messages, materials = materials, storyboard = storyboard
+        let known = "The project is called \(memory.name).\n\n" + ProjectBrief.knowledge(memory)
         chatTask = Task { [weak self] in
             do {
                 let looks = model.seesImages ? await workspace.looks(at: materials) : StudioWorkspace.Looks()
                 let answer = try await StoryboardWriter.answer(messages: messages, materials: materials, storyboard: storyboard,
-                                                               directory: workspace.directory, model: model, looks: looks) { partial in
+                                                               directory: workspace.baseDirectory, memory: known,
+                                                               model: model, looks: looks) { partial in
                     Task { @MainActor in
                         if self?.writing != nil, self?.workspace == workspace { self?.writing?.text = partial }
                     }
@@ -206,12 +288,22 @@ final class StudioModel: ObservableObject {
     }
 
     private func apply(_ answer: StoryboardWriter.Answer) {
-        messages.append(StudioMessage(role: .assistant, text: answer.reply, storyboard: answer.storyboard,
-                                      problems: answer.problems.isEmpty ? nil : answer.problems))
+        // Only what is new to the memory is kept, and shown as kept.
+        var changed = memory
+        let added = changed.remember(answer.remembered)
+        if !added.isEmpty {
+            memory = changed
+            try? project.save(changed)
+        }
+        var text = answer.reply
+        if text.isEmpty, !added.isEmpty { text = "Noted." }
+        messages.append(StudioMessage(role: .assistant, text: text, storyboard: answer.storyboard,
+                                      problems: answer.problems.isEmpty ? nil : answer.problems, remembered: added.isEmpty ? nil : added))
         if let text = answer.storyboard {
             try? workspace.saveStoryboard(text)
             reloadStoryboard()
-            reloadProjects()
+            reloadLists()
+            try? project.writeBrief()
         }
         saveChat()
     }
@@ -237,7 +329,7 @@ final class StudioModel: ObservableObject {
     // MARK: - Storyboard
 
     /// Reads the storyboard file again. Called after every change, and when
-    /// the app comes forward in case the file was edited by hand.
+    /// the window comes forward in case the file was edited by hand.
     func reloadStoryboard() {
         let text = workspace.loadStoryboard()
         let alreadyRead = outline != nil || !storyboardProblems.isEmpty || text == nil
@@ -250,7 +342,7 @@ final class StudioModel: ObservableObject {
         storyboardProblems = []
         if let text, let data = text.data(using: .utf8) {
             do {
-                let plan = try Storyboard.plan(from: data, baseDirectory: workspace.directory)
+                let plan = try Storyboard.plan(from: data, baseDirectory: workspace.baseDirectory)
                 let found = Storyboard.outline(of: plan)
                 outline = found
                 if !found.formats.contains(format) { format = found.formats.first ?? "wide" }
@@ -261,6 +353,16 @@ final class StudioModel: ObservableObject {
             }
         }
         refreshVideo()
+    }
+
+    /// Picks up files and facts an AI agent added from a terminal meanwhile.
+    func reloadFromDisk() {
+        guard writing == nil, !addingMaterials else { return }
+        let assets = project.loadAssets()
+        if assets != materials { materials = assets }
+        let stored = project.loadMemory()
+        if stored != memory, !showingProject { memory = stored }
+        reloadStoryboard()
     }
 
     // MARK: - Materials
@@ -300,9 +402,43 @@ final class StudioModel: ObservableObject {
         }
     }
 
+    /// Takes a picture of an open window and adds it to the project.
+    func captureWindow(_ source: WindowSource) {
+        let project = project
+        addingMaterials = true
+        materialError = nil
+        Task {
+            do {
+                let image = try await CaptureSources.screenshot(of: source.window)
+                let day = Date().formatted(date: .abbreviated, time: .shortened)
+                let asset = try project.addPicture(image, named: source.title.isEmpty ? source.appName : "\(source.appName) \(source.title)",
+                                                   note: "A screenshot of \(source.name), taken \(day).")
+                if self.project == project {
+                    materials.append(asset)
+                    // The first window captured tells the project which app it is.
+                    if memory.kind == .app, memory.app.window.isEmpty {
+                        var changed = memory
+                        changed.app.window = source.appName
+                        save(changed)
+                    }
+                }
+            } catch {
+                if self.project == project {
+                    materialError = "The screenshot could not be taken. Check that Tasjeel is allowed under System Settings › Privacy & Security › Screen & System Audio Recording. (\(error.localizedDescription))"
+                }
+            }
+            if self.project == project { addingMaterials = false }
+        }
+    }
+
     func remove(_ material: StudioMaterial) {
         materials.removeAll { $0.id == material.id }
         workspace.removeMaterial(material)
+        if memory.logo == material.file {
+            var changed = memory
+            changed.logo = ""
+            save(changed)
+        }
         saveChat()
         // The storyboard may have used it.
         storyboard = nil
@@ -314,7 +450,7 @@ final class StudioModel: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.image, .movie]
-        panel.message = "Choose screenshots, a logo, or videos to make the video from."
+        panel.message = "Choose screenshots, a logo, or videos. They are kept with the project and can be used in all its videos."
         panel.prompt = "Add"
         panel.begin { [weak self] response in
             guard response == .OK else { return }
@@ -323,7 +459,7 @@ final class StudioModel: ObservableObject {
         }
     }
 
-    // MARK: - Video
+    // MARK: - Rendered video
 
     /// Which rendered file to show, and whether it is out of date.
     private func refreshVideo() {
@@ -365,7 +501,7 @@ final class StudioModel: ObservableObject {
     /// Continues after the user agreed to download Remotion.
     func startRender() {
         guard render == nil, !formatsToRender.isEmpty else { return }
-        let workspace = workspace, formats = formatsToRender, root = root
+        let workspace = workspace, project = project, formats = formatsToRender, root = root
         player.pause()
         render = RenderJob(fraction: nil, label: "Preparing the clips…")
         renderTask = Task { [weak self] in
@@ -375,7 +511,7 @@ final class StudioModel: ObservableObject {
                 }
             }
             do {
-                _ = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL)
+                _ = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL, baseDirectory: workspace.baseDirectory)
                 for (index, format) in formats.enumerated() {
                     try Task.checkCancellation()
                     let name = formats.count > 1 ? "\(format.capitalized): " : ""
@@ -384,6 +520,7 @@ final class StudioModel: ObservableObject {
                         update(done, name + label)
                     }
                 }
+                try? project.writeBrief()
                 guard let self, self.workspace == workspace, !Task.isCancelled else { return }
                 self.render = nil
                 self.refreshVideo()
@@ -410,7 +547,7 @@ final class StudioModel: ObservableObject {
     // MARK: - Finder
 
     func revealProject() {
-        NSWorkspace.shared.open(workspace.directory)
+        NSWorkspace.shared.open(project.directory)
     }
 
     func revealVideo() {
@@ -429,7 +566,7 @@ final class StudioModel: ObservableObject {
     }
 }
 
-/// The Studio window. There is one; it shows one project at a time.
+/// The Studio window. There is one; it shows one video at a time.
 @MainActor
 final class StudioWindow: NSObject, NSWindowDelegate {
     static let shared = StudioWindow()
@@ -437,11 +574,12 @@ final class StudioWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private(set) var model: StudioModel?
 
-    func open(project directory: URL? = nil) {
+    /// `video` is a video's folder inside a project, to open that one.
+    func open(video directory: URL? = nil) {
         let quiet = DebugSnapshot.isActive
         if !quiet { NSApp.activate(ignoringOtherApps: true) }
         if let window, let model {
-            if let directory { model.open(StudioWorkspace(directory: directory)) }
+            if let directory { model.open(video: directory) }
             window.makeKeyAndOrderFront(nil)
             return
         }
@@ -471,8 +609,10 @@ final class StudioWindow: NSObject, NSWindowDelegate {
         window = nil
     }
 
-    /// The storyboard may have been edited in another app meanwhile.
+    /// Files and facts may have been added from outside meanwhile, and the
+    /// list of open windows will have changed.
     func windowDidBecomeKey(_ notification: Notification) {
-        model?.reloadStoryboard()
+        model?.reloadFromDisk()
+        Task { await AppState.shared.refreshSources() }
     }
 }

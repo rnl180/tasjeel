@@ -275,7 +275,13 @@ public extension Storyboard {
                 let items = scene["items"] as? [[String: Any]] ?? []
                 main = items.map { item in
                     let value = (item["value"] as? NSNumber)?.doubleValue ?? 0
-                    let number = value == value.rounded() ? String(Int(value)) : String(value)
+                    var number = value == value.rounded() ? String(Int(value)) : String(value)
+                    if abs(value) >= 10000, value == value.rounded() {
+                        let grouped = NumberFormatter()
+                        grouped.locale = Locale(identifier: "en_US")
+                        grouped.numberStyle = .decimal
+                        number = grouped.string(from: NSNumber(value: Int(value))) ?? number
+                    }
                     let figure = "\(item["prefix"] as? String ?? "")\(number)\(item["suffix"] as? String ?? "")"
                     let label = item["label"] as? String ?? ""
                     return label.isEmpty ? figure : "\(figure) \(label)"

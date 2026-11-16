@@ -4,7 +4,9 @@ import Foundation
 enum Main {
     static func main() {
         let args = CommandLine.arguments
-        if args.contains("--studio") {
+        if args.contains("--project") {
+            SelfTest.project()
+        } else if args.contains("--studio") {
             // First, because it has a --render option of its own.
             SelfTest.studio()
         } else if args.contains("--selftest-record") {

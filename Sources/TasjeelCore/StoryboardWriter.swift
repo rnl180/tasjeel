@@ -12,11 +12,14 @@ public enum StoryboardWriter {
         public var storyboard: String?
         /// Why the storyboard in the answer was turned down, when it was.
         public var problems: [String]
+        /// Lasting facts about the project the model asked to have kept.
+        public var remembered: [String]
 
-        public init(reply: String, storyboard: String? = nil, problems: [String] = []) {
+        public init(reply: String, storyboard: String? = nil, problems: [String] = [], remembered: [String] = []) {
             self.reply = reply
             self.storyboard = storyboard
             self.problems = problems
+            self.remembered = remembered
         }
     }
 
@@ -39,16 +42,17 @@ public enum StoryboardWriter {
     /// - Parameters:
     ///   - storyboard: the storyboard file as it is now, if there is one.
     ///   - directory: the project folder; files in a storyboard are relative to it.
+    ///   - memory: what is known about the project the video belongs to.
     ///   - looks: pictures of the materials, for models that can see.
     ///   - partial: receives the reply so far while it is being written.
     public static func answer(messages: [StudioMessage], materials: [StudioMaterial], storyboard: String?, directory: URL,
-                              model: any TextModel, looks: StudioWorkspace.Looks = .init(),
+                              memory: String? = nil, model: any TextModel, looks: StudioWorkspace.Looks = .init(),
                               partial: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Answer {
         let images = model.seesImages ? looks.images : []
-        let prompt = Prompt.request(messages: messages, materials: materials, storyboard: storyboard,
+        let prompt = Prompt.request(messages: messages, materials: materials, storyboard: storyboard, memory: memory,
                                     labels: model.seesImages ? looks.labels : [:], budget: model.transcriptBudget)
         let first = try await ask(model, prompt: prompt, images: images) { partial(Reply.visible($0)) }
-        guard var proposed = first.storyboard else { return Answer(reply: first.reply) }
+        guard var proposed = first.storyboard else { return Answer(reply: first.reply, remembered: first.remembered) }
         var reply = first.reply
         var raw = first.raw
 
@@ -65,8 +69,9 @@ public enum StoryboardWriter {
             if !again.reply.isEmpty { reply = again.reply }
             problems = await check(fixed, directory: directory)
         }
-        guard problems.isEmpty else { return Answer(reply: first.reply, problems: problems) }
-        return Answer(reply: reply.isEmpty ? "The storyboard is ready." : reply, storyboard: Storyboard.text(for: proposed))
+        guard problems.isEmpty else { return Answer(reply: first.reply, problems: problems, remembered: first.remembered) }
+        return Answer(reply: reply.isEmpty ? "The storyboard is ready." : reply, storyboard: Storyboard.text(for: proposed),
+                      remembered: first.remembered)
     }
 
     private static func ask(_ model: any TextModel, prompt: String, images: [ModelImage],
@@ -78,7 +83,7 @@ public enum StoryboardWriter {
             throw WriterError.declined
         }
         let reply = Reply(raw)
-        if reply.reply.isEmpty, reply.storyboard == nil { throw WriterError.silent }
+        if reply.reply.isEmpty, reply.storyboard == nil, reply.remembered.isEmpty { throw WriterError.silent }
         return reply
     }
 
@@ -97,11 +102,13 @@ public enum StoryboardWriter {
 
     // MARK: - Reading an answer
 
-    /// A model's answer split into the words for the user and the storyboard.
+    /// A model's answer split into the words for the user, the storyboard,
+    /// and anything it asked to have remembered.
     struct Reply {
         var raw: String
         var reply: String
         var storyboard: [String: Any]?
+        var remembered: [String] = []
 
         init(_ text: String) {
             var body = text
@@ -110,6 +117,17 @@ public enum StoryboardWriter {
                 body.removeSubrange(open.lowerBound ..< close.upperBound)
             }
             raw = body
+
+            // Things to remember come in their own block, one to a line.
+            for block in Self.fences(in: body).reversed() where block.language == "remember" {
+                let lines = body[block.inner].split(separator: "\n").map { line -> String in
+                    var line = line.trimmingCharacters(in: .whitespaces)
+                    for mark in ["- ", "* ", "• "] where line.hasPrefix(mark) { line = String(line.dropFirst(mark.count)) }
+                    return line.trimmingCharacters(in: .whitespaces)
+                }
+                remembered = lines.filter { !$0.isEmpty } + remembered
+                body.removeSubrange(block.whole)
+            }
             reply = body.trimmingCharacters(in: .whitespacesAndNewlines)
 
             // The storyboard is the last fenced block that holds one...
@@ -153,14 +171,15 @@ public enum StoryboardWriter {
             return object["scenes"] != nil ? object : nil
         }
 
-        private static func fences(in text: String) -> [(whole: Range<String.Index>, inner: Range<String.Index>)] {
-            var found: [(Range<String.Index>, Range<String.Index>)] = []
+        private static func fences(in text: String) -> [(whole: Range<String.Index>, inner: Range<String.Index>, language: String)] {
+            var found: [(Range<String.Index>, Range<String.Index>, String)] = []
             var cursor = text.startIndex
             while let open = text.range(of: "```", range: cursor ..< text.endIndex) {
                 // Skip the language name on the opening line.
                 let lineEnd = text[open.upperBound...].firstIndex(of: "\n") ?? text.endIndex
                 guard let close = text.range(of: "```", range: lineEnd ..< text.endIndex) else { break }
-                found.append((open.lowerBound ..< close.upperBound, lineEnd ..< close.lowerBound))
+                let language = text[open.upperBound ..< lineEnd].trimmingCharacters(in: .whitespaces).lowercased()
+                found.append((open.lowerBound ..< close.upperBound, lineEnd ..< close.lowerBound, language))
                 cursor = close.upperBound
             }
             return found
@@ -215,16 +234,34 @@ public enum StoryboardWriter {
         # What makes it good, honest and buildable
 
         - Use only the files listed under Materials, written exactly as they are listed. If a scene would need a picture or clip that is not there, write the video without it (a feature scene works without an image) and say in your reply what would improve it.
-        - Never invent a customer's words, a person's name, or a figure. Use a quote or numbers scene only with words and figures the person gave you or that you can read in their material. If one would help the video, ask for it in your reply.
+        - Never invent a customer's words, a person's name, or a figure. Use a quote or numbers scene only with words and figures the person gave you, that are in the project's memory, or that you can read in their material. If one would help the video, ask for it in your reply.
         - Do not promise what the material does not show. Describe the product as the person described it.
         - Unless asked otherwise: 15 to 45 seconds in all, four to eight scenes, opening with a hook and closing with a cta. Give a scene enough time to be read: about one second for every three words on screen, and never under 2.5 seconds.
         - For a recording, choose the part worth showing. When you are told what is said at which time, use it to pick "start".
         - Write like a person talking to another person. One idea per scene. No filler such as "revolutionary" or "seamless".
+
+        # The project's memory
+
+        A video usually belongs to a project: a product or an app the person makes many videos for. When the request starts with "About the project", that is what Tasjeel has remembered about it. Rely on it instead of asking again: its audience, the way it talks, its features, its brand colours and logo. Facts listed there as true may be shown in the video. What the person says in the chat wins over the memory where they differ.
+
+        When the person tells you something that will still be true for the next video (who the product is for, a feature, a figure, a customer's words, how they like things written, a colour), add a block like this after everything else, one fact to a line, each understandable on its own:
+
+        ```remember
+        The audience is clinic owners in the Gulf, not developers.
+        They never want the word "AI" on screen.
+        ```
+
+        Tasjeel saves those lines to the project's memory and shows the person what was saved. Leave the block out when there is nothing new and lasting; a request about this one video ("shorter intro") is not something to remember, and neither is anything already in the memory.
         """
 
-        static func request(messages: [StudioMessage], materials: [StudioMaterial], storyboard: String?,
+        static func request(messages: [StudioMessage], materials: [StudioMaterial], storyboard: String?, memory: String? = nil,
                             labels: [String: [String]], budget: Int) -> String {
             var parts: [String] = []
+            if var memory = memory?.trimmingCharacters(in: .whitespacesAndNewlines), !memory.isEmpty {
+                // Never more than a third of what a small model can read.
+                if memory.count > budget / 3 { memory = String(memory.prefix(budget / 3)) + " […]" }
+                parts.append("# About the project\n\n\(memory)")
+            }
 
             // Notes on materials (what is said in a recording) are trimmed
             // for models that can only read a little.

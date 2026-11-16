@@ -52,6 +52,7 @@ struct StudioView: View {
             return true
         }
         .sheet(isPresented: $showingAISettings) { AISettingsView(ai: ai) }
+        .sheet(isPresented: $model.showingProject) { ProjectMemoryView(model: model) }
         .alert("Download Remotion?", isPresented: $model.askDownload) {
             Button("Download and Create Video") { model.startRender() }
             Button("Cancel", role: .cancel) {}
@@ -62,34 +63,53 @@ struct StudioView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Menu {
-                ForEach(model.projects) { project in
+                ForEach(model.projects) { entry in
                     Button {
-                        model.open(project.workspace)
+                        model.open(project: entry.directory)
                     } label: {
-                        if project.workspace == model.workspace { Label(project.title, systemImage: "checkmark") } else { Text(project.title) }
+                        if entry.directory == model.project.directory { Label(entry.title, systemImage: "checkmark") } else { Text(entry.title) }
                     }
                 }
                 Divider()
-                Button("New Video") { model.newProject() }
+                Button("New Project…") { model.newProject() }
                 Button("Show Project in Finder") { model.revealProject() }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles.rectangle.stack").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.accent)
-                    Text(model.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.faint)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.stroke))
+                pill(symbol: "shippingbox", title: model.memory.name)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .fixedSize()
+            .help("The project: its memory and files are shared by all its videos")
+
+            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.faint)
+
+            Menu {
+                ForEach(model.videos) { entry in
+                    Button {
+                        model.open(video: entry.directory)
+                    } label: {
+                        if entry.directory == model.workspace.directory { Label(entry.title, systemImage: "checkmark") } else { Text(entry.title) }
+                    }
+                }
+                Divider()
+                Button("New Video") { model.newVideo() }
+            } label: {
+                pill(symbol: "sparkles.rectangle.stack", title: model.title)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help("The video being made")
 
             Spacer()
+
+            Button { model.showingProject = true } label: {
+                Label("Project Memory", systemImage: "brain")
+            }
+            .buttonStyle(QuietButtonStyle())
+            .help("What Tasjeel remembers about \(model.memory.name), and the brief to give an AI agent")
 
             Button { showingAISettings = true } label: {
                 Label("AI Settings", systemImage: "gearshape")
@@ -100,6 +120,19 @@ struct StudioView: View {
         .padding(.trailing, 14)
         .frame(height: 48)
         .background(Theme.panel)
+    }
+
+    private func pill(symbol: String, title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.accent)
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.faint)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .frame(maxWidth: 260)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 
@@ -225,6 +258,17 @@ struct StudioChatPane: View {
                 HStack(spacing: 8) {
                     Menu {
                         Button("Pictures and Videos…") { model.chooseMaterials() }
+                        Menu("A Screenshot of a Window") {
+                            if !app.hasScreenAccess {
+                                Button("Allow Screen Recording…") { app.requestScreenAccess() }
+                            } else if app.windows.isEmpty {
+                                Text("No app windows are open")
+                            } else {
+                                ForEach(app.windows) { window in
+                                    Button(window.name) { model.captureWindow(window) }
+                                }
+                            }
+                        }
                         if !app.items.isEmpty {
                             Menu("A Recording from the Library") {
                                 ForEach(app.items.prefix(20)) { entry in
@@ -250,10 +294,10 @@ struct StudioChatPane: View {
                     .menuStyle(.button)
                     .buttonStyle(.plain)
                     .fixedSize()
-                    .help("Add screenshots, a logo or recordings for the video to use. You can also drop files on the window.")
+                    .help("Add screenshots, a logo or recordings. They are kept with the project and shared by all its videos. You can also drop files on the window.")
 
                     ForEach(model.materials) { material in
-                        MaterialChip(material: material, url: model.workspace.directory.appendingPathComponent(material.file)) {
+                        MaterialChip(material: material, url: model.baseDirectory.appendingPathComponent(material.file)) {
                             model.remove(material)
                         }
                     }
@@ -399,6 +443,24 @@ struct StudioMessageRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.warn.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
+                if let remembered = message.remembered, !remembered.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Added to the project's memory", systemImage: "brain")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                        ForEach(remembered, id: \.self) { fact in
+                            Text("• \(fact)")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.subtext)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .reading(fact)
+                        }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
                 if message.storyboard != nil {
                     HStack(spacing: 6) {
                         Image(systemName: "film.stack").font(.system(size: 10.5))
@@ -442,7 +504,7 @@ struct MaterialChip: View {
             }
             .buttonStyle(.plain)
             .opacity(hovering ? 1 : 0.35)
-            .help("Remove \(material.name) from this video")
+            .help("Remove \(material.name) from the project")
             .accessibilityLabel("Remove \(material.name)")
         }
         .padding(.leading, 6)

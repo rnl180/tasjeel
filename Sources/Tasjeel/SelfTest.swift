@@ -258,12 +258,90 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
-    /// `Tasjeel --studio <project folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>]`
+    /// `Tasjeel --project <project folder> [--brief] [--remember <fact>]... [--add <file>]... [--windows] [--screenshot <window> [--name <name>]]`
+    ///
+    /// What an AI agent uses to work on a project from a terminal: read its
+    /// brief, add to its memory, add files, and take a screenshot of an open
+    /// app window into its assets. The folder becomes a project if it is not
+    /// one yet. PROJECT.md in the folder lists these commands.
+    static func project() {
+        let args = CommandLine.arguments
+        func values(_ flag: String) -> [String] {
+            args.indices.filter { args[$0] == flag && $0 + 1 < args.count && !args[$0 + 1].hasPrefix("--") }.map { args[$0 + 1] }
+        }
+        guard let path = values("--project").first else {
+            print("FAIL usage: --project <project folder> [--brief] [--remember <fact>]... [--add <file>]... [--windows] [--screenshot <window> [--name <name>]]")
+            exit(1)
+        }
+        Task {
+            do {
+                let directory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+                let project = ProjectFolder(directory: directory)
+                if !project.exists {
+                    let contents = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+                    guard contents.allSatisfy({ $0.hasPrefix(".") }) else {
+                        print("FAIL \(directory.lastPathComponent) exists and is not a Tasjeel project")
+                        exit(1)
+                    }
+                    try project.save(ProjectMemory(name: directory.lastPathComponent))
+                    print("created project \(project.folderName)")
+                }
+
+                let added = try project.remember(values("--remember"))
+                for fact in added { print("remembered: \(fact)") }
+                if added.count < values("--remember").count { print("already known: \(values("--remember").count - added.count)") }
+
+                for file in values("--add") {
+                    let asset = try await project.addAsset(from: URL(fileURLWithPath: (file as NSString).expandingTildeInPath))
+                    print("added \(asset.file) \(asset.width)x\(asset.height)\(asset.seconds.map { " \($0)s" } ?? "")")
+                }
+
+                if args.contains("--windows") || !values("--screenshot").isEmpty {
+                    guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+                        print("FAIL screenshots need Screen Recording permission for the app running this command (System Settings › Privacy & Security › Screen & System Audio Recording)")
+                        exit(1)
+                    }
+                    // Taking a picture of a window needs the connection to the
+                    // window system that an app has and a bare command does not.
+                    await MainActor.run { _ = NSApplication.shared }
+                    let windows = try await CaptureSources.shareable().windows
+                    if args.contains("--windows") {
+                        for window in windows { print("window: \(window.name) (\(Int(window.window.frame.width))x\(Int(window.window.frame.height)))") }
+                        if windows.isEmpty { print("window: none open") }
+                    }
+                    if let words = values("--screenshot").first {
+                        guard let window = CaptureSources.window(matching: words, in: windows) else {
+                            print("FAIL no open window matches \"\(words)\". Open: \(Set(windows.map(\.appName)).sorted().joined(separator: ", "))")
+                            exit(1)
+                        }
+                        let image = try await CaptureSources.screenshot(of: window.window)
+                        let day = Date().formatted(date: .abbreviated, time: .shortened)
+                        let asset = try project.addPicture(image, named: values("--name").first ?? window.name,
+                                                           note: "A screenshot of \(window.name), taken \(day).")
+                        print("screenshot \(asset.file) \(asset.width)x\(asset.height) of \(window.name)")
+                    }
+                }
+
+                try project.writeBrief()
+                if args.contains("--brief") { print(try String(contentsOf: project.briefURL, encoding: .utf8)) }
+                print("OK")
+                exit(0)
+            } catch {
+                print("FAIL \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
+    /// `Tasjeel --studio <video folder> [--add <file>]... [--say <message>] [--engine claude|ollama] [--model <name>] [--render <size>]`
     ///
     /// One turn of the Studio from a terminal: adds material, sends a message
     /// to the model, saves the storyboard it writes, and optionally renders a
-    /// size. The folder is created if needed. For Claude the key is read from
-    /// the ANTHROPIC_API_KEY environment variable; it is never an argument.
+    /// size. The folder is created if needed; inside a project's `videos`
+    /// folder it uses that project's memory and assets. For Claude the key is
+    /// read from the ANTHROPIC_API_KEY environment variable; it is never an
+    /// argument.
     static func studio() {
         let args = CommandLine.arguments
         func values(_ flag: String) -> [String] {
@@ -275,7 +353,7 @@ enum SelfTest {
         }
         Task {
             do {
-                let workspace = StudioWorkspace(directory: URL(fileURLWithPath: folder, isDirectory: true))
+                let workspace = StudioWorkspace(directory: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath, isDirectory: true))
                 try workspace.prepare()
                 var chat = workspace.loadChat()
                 for path in values("--add") {
@@ -305,27 +383,39 @@ enum SelfTest {
                     }
                     chat.messages.append(StudioMessage(role: .user, text: message))
                     let looks = model.seesImages ? await workspace.looks(at: chat.materials) : StudioWorkspace.Looks()
+                    let memory = workspace.project.map { project -> String in
+                        let memory = project.loadMemory()
+                        return "The project is called \(memory.name).\n\n" + ProjectBrief.knowledge(memory)
+                    }
                     let answer = try await StoryboardWriter.answer(messages: chat.messages, materials: chat.materials,
-                                                                   storyboard: workspace.loadStoryboard(), directory: workspace.directory,
-                                                                   model: model, looks: looks)
+                                                                   storyboard: workspace.loadStoryboard(), directory: workspace.baseDirectory,
+                                                                   memory: memory, model: model, looks: looks)
+                    let added = try workspace.project?.remember(answer.remembered) ?? []
                     chat.messages.append(StudioMessage(role: .assistant, text: answer.reply, storyboard: answer.storyboard,
-                                                       problems: answer.problems.isEmpty ? nil : answer.problems))
+                                                       problems: answer.problems.isEmpty ? nil : answer.problems,
+                                                       remembered: added.isEmpty ? nil : added))
                     if let text = answer.storyboard { try workspace.saveStoryboard(text) }
                     try workspace.save(chat)
                     print("engine: \(model.displayName) pictures=\(looks.images.count)")
                     print("reply: \(answer.reply)")
                     print("storyboard: \(answer.storyboard == nil ? "unchanged" : "saved")")
                     for problem in answer.problems { print("problem: \(problem)") }
+                    for fact in added { print("remembered: \(fact)") }
+                    try? workspace.project?.writeBrief()
                 }
 
                 if let format = values("--render").first {
-                    let summary = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL)
+                    let summary = try await StudioProject.build(storyboard: workspace.storyboardURL, in: workspace.videoURL,
+                                                                baseDirectory: workspace.baseDirectory)
                     print("built scenes=\(summary.scenes) seconds=\(String(format: "%.1f", summary.seconds))")
-                    let url = try await StudioRenderer.render(project: workspace.videoURL, format: format,
-                                                              root: workspace.directory.deletingLastPathComponent()) { fraction, label in
+                    // Remotion is shared from the Studio folder: beside the
+                    // projects, or beside a video that stands on its own.
+                    let root = workspace.project?.directory.deletingLastPathComponent() ?? workspace.directory.deletingLastPathComponent()
+                    let url = try await StudioRenderer.render(project: workspace.videoURL, format: format, root: root) { fraction, label in
                         print("  \(fraction.map { String(format: "%3.0f%%", $0 * 100) } ?? "  …") \(label)")
                     }
                     print("rendered \(url.lastPathComponent)")
+                    try? workspace.project?.writeBrief()
                 }
                 print("OK")
                 exit(0)

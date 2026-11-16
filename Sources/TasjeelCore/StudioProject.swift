@@ -43,9 +43,12 @@ public enum StudioProject {
     /// Builds (or refreshes) the project. `progress` receives 0 ... 1 and a
     /// short description.
     ///
+    /// File names in the storyboard are relative to `baseDirectory`, or to
+    /// the storyboard's own folder when none is given.
+    ///
     /// Refreshing replaces the storyboard data and the media and leaves the
     /// code alone, so changes made to how scenes look survive a rebuild.
-    public static func build(storyboard url: URL, in directory: URL,
+    public static func build(storyboard url: URL, in directory: URL, baseDirectory: URL? = nil,
                              progress: @escaping @Sendable (Double, String) -> Void = { _, _ in }) async throws -> Summary {
         let data: Data
         do {
@@ -54,7 +57,7 @@ public enum StudioProject {
             throw StoryboardError.unreadable(error.localizedDescription)
         }
         progress(0, "Checking the storyboard…")
-        var plan = try Storyboard.plan(from: data, baseDirectory: url.deletingLastPathComponent())
+        var plan = try Storyboard.plan(from: data, baseDirectory: baseDirectory ?? url.deletingLastPathComponent())
         guard canBuild(in: directory) else { throw BuildError.notAProject(directory.lastPathComponent) }
 
         // Clips are checked before anything is written, so a storyboard with

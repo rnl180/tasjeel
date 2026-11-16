@@ -1,6 +1,6 @@
 # Plan: Marketing Video Studio
 
-Status: phases 1 and 2 are built (see [Storyboards](../storyboard.md) and [Studio](../studio.md)). Phases 3 to 5 are proposals. Written 16 November 2026.
+Status: phases 1 and 2 and project memory are built (see [Storyboards](../storyboard.md) and [Studio](../studio.md)). Phases 3 to 5 are proposals. Written 16 November 2026.
 
 ## What this is
 
@@ -77,6 +77,8 @@ Each phase ends with something usable.
 **1. Storyboard to video. Done.** The storyboard format, the six scene templates, the brand kit, and a builder that turns a hand-written storyboard into a Remotion project. No AI and no keys. The example in `Examples/studio` renders in all three sizes, and an Arabic storyboard renders right to left.
 
 **2. Chat to storyboard. Done.** The Studio window: material in, chat on one side, scenes and the rendered video on the other. Claude (which sees the pictures) or a local model in Ollama writes and revises the storyboard; each one is checked and a faulty one goes back to the model with its problems. The video renders inside the app. Differences from the proposal: the model answers in words plus a whole storyboard rather than through a fixed form, a change re-renders the whole video rather than only the scenes it touched, and Remotion is downloaded once and shared between projects (decision 1 below: Node.js is still the user's to install).
+
+**2b. Project memory. Done.** Not in the first plan; added on request. Videos belong to projects. A project keeps a memory (what it is, audience, voice, features, true facts, brand, and for an app where it runs) that every video starts from and that the chat adds to, shared assets, and a `PROJECT.md` brief for AI agents with commands to take screenshots of the running app, add to the memory and make videos. See [Studio](../studio.md).
 
 **3. Voice and sound.** The Connections page, ElevenLabs voiceover with word-timed captions, the free built-in voice fallback, music from a folder or generated. Done when a video has narration in sync with its captions in English and Arabic.
 

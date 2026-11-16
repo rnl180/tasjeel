@@ -50,14 +50,18 @@ public struct StudioMessage: Codable, Equatable, Identifiable, Sendable {
     public var storyboard: String?
     /// Problems that made Tasjeel turn down the storyboard in this answer.
     public var problems: [String]?
+    /// What this answer added to the project's memory.
+    public var remembered: [String]?
 
-    public init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), storyboard: String? = nil, problems: [String]? = nil) {
+    public init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), storyboard: String? = nil,
+                problems: [String]? = nil, remembered: [String]? = nil) {
         self.id = id
         self.role = role
         self.text = text
         self.date = date
         self.storyboard = storyboard
         self.problems = problems
+        self.remembered = remembered
     }
 }
 
@@ -72,14 +76,17 @@ public struct StudioChat: Codable, Equatable, Sendable {
     }
 }
 
-/// A Studio project on disk:
+/// One Studio video on disk. It normally lives inside a project (see
+/// `ProjectFolder`), whose assets it shares:
 ///
-///     ~/Movies/Tasjeel Studio/Launch video/
+///     ~/Movies/Tasjeel Studio/Orbit/videos/Launch video/
 ///         storyboard.json   the video, as written by the chat (or by hand)
-///         chat.json         the conversation and the list of materials
-///         materials/        the pictures and clips that were added
+///         chat.json         the conversation
 ///         video/            the Remotion project built from the storyboard
 ///             out/          the rendered videos
+///
+/// A video folder on its own, outside any project, also works: it then
+/// keeps its files in a `materials` folder of its own, listed in chat.json.
 public struct StudioWorkspace: Equatable, Sendable {
     public let directory: URL
 
@@ -99,6 +106,19 @@ public struct StudioWorkspace: Equatable, Sendable {
     public var videoURL: URL { directory.appendingPathComponent("video", isDirectory: true) }
 
     public func renderedURL(_ format: String) -> URL { videoURL.appendingPathComponent("out/\(format).mp4") }
+
+    /// The project this video belongs to, when it is inside one
+    /// (`<project>/videos/<this video>`).
+    public var project: ProjectFolder? {
+        let parent = directory.deletingLastPathComponent()
+        guard parent.lastPathComponent == ProjectFolder.videosFolder else { return nil }
+        let project = ProjectFolder(directory: parent.deletingLastPathComponent())
+        return project.exists ? project : nil
+    }
+
+    /// The folder that file names in the storyboard are relative to: the
+    /// project's, so "assets/logo.svg" means the same in all its videos.
+    public var baseDirectory: URL { project?.directory ?? directory }
 
     static let materialsFolder = "materials"
 
@@ -144,27 +164,36 @@ public struct StudioWorkspace: Equatable, Sendable {
 
     /// Creates the folders and an empty chat, if they are not there yet.
     public func prepare() throws {
-        try FileManager.default.createDirectory(at: materialsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project == nil ? materialsURL : directory, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: chatURL.path) { try save(StudioChat()) }
     }
 
     // MARK: - Chat and storyboard
 
+    /// The conversation and the materials. In a project the materials are
+    /// the project's assets, shared by all its videos.
     public func loadChat() -> StudioChat {
-        guard let data = try? Data(contentsOf: chatURL) else { return StudioChat() }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        var chat = (try? decoder.decode(StudioChat.self, from: data)) ?? StudioChat()
-        // A material whose file was deleted in the Finder is forgotten.
-        chat.materials.removeAll { !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.file).path) }
+        var chat = (try? Data(contentsOf: chatURL)).flatMap { try? decoder.decode(StudioChat.self, from: $0) } ?? StudioChat()
+        if let project {
+            chat.materials = project.loadAssets()
+        } else {
+            // A material whose file was deleted in the Finder is forgotten.
+            chat.materials.removeAll { !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.file).path) }
+        }
         return chat
     }
 
     public func save(_ chat: StudioChat) throws {
+        var stored = chat
+        // A project keeps its own list of assets, changed only by adding and
+        // removing them, so a stale copy here can never overwrite it.
+        if project != nil { stored.materials = [] }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(chat).write(to: chatURL, options: .atomic)
+        try encoder.encode(stored).write(to: chatURL, options: .atomic)
     }
 
     /// The storyboard file's text, or nil when there is none yet.
@@ -180,81 +209,21 @@ public struct StudioWorkspace: Equatable, Sendable {
 
     // MARK: - Materials
 
-    public enum MaterialError: LocalizedError {
-        case unsupported(String)
-        case unreadable(String)
-
-        public var errorDescription: String? {
-            switch self {
-            case .unsupported(let name):
-                return "“\(name)” is not a kind of file the Studio can use. Add pictures (.png, .jpg, .webp, .svg) or videos (.mp4, .mov, .m4v)."
-            case .unreadable(let name):
-                return "“\(name)” could not be opened."
-            }
-        }
-    }
-
-    /// Copies a file into the project and describes it. On the Mac's usual
-    /// disk format the copy takes no extra space until one of them changes.
+    /// Copies a file in and describes it: into the project's shared assets
+    /// when the video belongs to a project, otherwise into the video's own
+    /// materials. A project lists its own assets; for a video on its own the
+    /// caller adds the result to the chat's materials and saves the chat.
     public func addMaterial(from source: URL, named preferred: String? = nil, note: String? = nil) async throws -> StudioMaterial {
-        let type = source.pathExtension.lowercased()
-        let kind: StudioMaterial.Kind
-        if Storyboard.imageTypes.contains(type) {
-            kind = .picture
-        } else if Storyboard.videoTypes.contains(type) {
-            kind = .video
-        } else {
-            throw MaterialError.unsupported(source.lastPathComponent)
-        }
-        try FileManager.default.createDirectory(at: materialsURL, withIntermediateDirectories: true)
-        let name = Self.freeName(for: preferred ?? source.deletingPathExtension().lastPathComponent, type: type,
-                                 fallback: kind == .picture ? "picture" : "clip", in: materialsURL)
-        let destination = materialsURL.appendingPathComponent(name)
-        try FileManager.default.copyItem(at: source, to: destination)
-
-        var material = StudioMaterial(file: "\(Self.materialsFolder)/\(name)", kind: kind, width: 0, height: 0, note: note)
-        do {
-            switch kind {
-            case .picture:
-                guard let size = Self.pictureSize(destination) else { throw MaterialError.unreadable(source.lastPathComponent) }
-                material.width = Int(size.width)
-                material.height = Int(size.height)
-            case .video:
-                let asset = AVURLAsset(url: destination)
-                guard let track = try await asset.loadTracks(withMediaType: .video).first else {
-                    throw MaterialError.unreadable(source.lastPathComponent)
-                }
-                let (natural, transform) = try await track.load(.naturalSize, .preferredTransform)
-                let upright = natural.applying(transform)
-                material.width = Int(abs(upright.width))
-                material.height = Int(abs(upright.height))
-                material.seconds = (try await asset.load(.duration).seconds * 10).rounded(.down) / 10
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: destination)
-            throw error is MaterialError ? error : MaterialError.unreadable(source.lastPathComponent)
-        }
-        return material
+        if let project { return try await project.addAsset(from: source, named: preferred, note: note) }
+        return try await StudioMaterial.importing(source, into: materialsURL, base: directory, named: preferred, note: note)
     }
 
     public func removeMaterial(_ material: StudioMaterial) {
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent(material.file))
-    }
-
-    /// A plain file name the model can copy without mistakes: lower-case
-    /// letters, digits and hyphens. "Résumé Screen (2).PNG" becomes
-    /// "resume-screen-2.png".
-    static func freeName(for title: String, type: String, fallback: String, in folder: URL) -> String {
-        var base = RemotionProject.packageName(for: title)
-        if base == "tasjeel-recording" { base = fallback }
-        base = String(base.prefix(40)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        var name = "\(base).\(type)"
-        var n = 2
-        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
-            name = "\(base)-\(n).\(type)"
-            n += 1
+        if let project {
+            try? project.removeAsset(material)
+        } else {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(material.file))
         }
-        return name
     }
 
     static func pictureSize(_ url: URL) -> CGSize? {
@@ -293,7 +262,7 @@ public struct StudioWorkspace: Equatable, Sendable {
         }
         var shown: [(file: String, time: Double?, image: ModelImage)] = []
         for item in wanted.prefix(limit) {
-            let url = directory.appendingPathComponent(item.material.file)
+            let url = baseDirectory.appendingPathComponent(item.material.file)
             let picture: CGImage?
             if let time = item.time {
                 picture = await Self.frame(of: url, at: time)
@@ -355,5 +324,85 @@ public struct StudioWorkspace: Equatable, Sendable {
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, flat, [kCGImageDestinationLossyCompressionQuality: 0.72] as CFDictionary)
         return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+}
+
+// MARK: - Bringing a file in
+
+public extension StudioMaterial {
+    enum ImportError: LocalizedError {
+        case unsupported(String)
+        case unreadable(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .unsupported(let name):
+                return "“\(name)” is not a kind of file the Studio can use. Add pictures (.png, .jpg, .webp, .svg) or videos (.mp4, .mov, .m4v)."
+            case .unreadable(let name):
+                return "“\(name)” could not be opened."
+            }
+        }
+    }
+
+    /// Copies `source` into `folder` under a plain name and describes it.
+    /// `base` is the folder the result's `file` is relative to. On the Mac's
+    /// usual disk format the copy takes no extra space until one changes.
+    static func importing(_ source: URL, into folder: URL, base: URL, named preferred: String? = nil, note: String? = nil) async throws -> StudioMaterial {
+        let type = source.pathExtension.lowercased()
+        let kind: Kind
+        if Storyboard.imageTypes.contains(type) {
+            kind = .picture
+        } else if Storyboard.videoTypes.contains(type) {
+            kind = .video
+        } else {
+            throw ImportError.unsupported(source.lastPathComponent)
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = freeName(for: preferred ?? source.deletingPathExtension().lastPathComponent, type: type,
+                            fallback: kind == .picture ? "picture" : "clip", in: folder)
+        let destination = folder.appendingPathComponent(name)
+        try FileManager.default.copyItem(at: source, to: destination)
+
+        let prefix = folder.resolvingSymlinksInPath().path.dropFirst(base.resolvingSymlinksInPath().path.count)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var material = StudioMaterial(file: prefix.isEmpty ? name : "\(prefix)/\(name)", kind: kind, width: 0, height: 0, note: note)
+        do {
+            switch kind {
+            case .picture:
+                guard let size = StudioWorkspace.pictureSize(destination) else { throw ImportError.unreadable(source.lastPathComponent) }
+                material.width = Int(size.width)
+                material.height = Int(size.height)
+            case .video:
+                let asset = AVURLAsset(url: destination)
+                guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+                    throw ImportError.unreadable(source.lastPathComponent)
+                }
+                let (natural, transform) = try await track.load(.naturalSize, .preferredTransform)
+                let upright = natural.applying(transform)
+                material.width = Int(abs(upright.width))
+                material.height = Int(abs(upright.height))
+                material.seconds = (try await asset.load(.duration).seconds * 10).rounded(.down) / 10
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error is ImportError ? error : ImportError.unreadable(source.lastPathComponent)
+        }
+        return material
+    }
+
+    /// A plain file name a model can copy without mistakes: lower-case
+    /// letters, digits and hyphens. "Résumé Screen (2).PNG" becomes
+    /// "resume-screen-2.png".
+    internal static func freeName(for title: String, type: String, fallback: String, in folder: URL) -> String {
+        var base = RemotionProject.packageName(for: title)
+        if base == "tasjeel-recording" { base = fallback }
+        base = String(base.prefix(40)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        var name = "\(base).\(type)"
+        var n = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
+            name = "\(base)-\(n).\(type)"
+            n += 1
+        }
+        return name
     }
 }

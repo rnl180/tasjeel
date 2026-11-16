@@ -46,13 +46,16 @@ enum DebugSnapshot {
                 window.close()
             }
 
-            // TASJEEL_SNAPSHOT_STUDIO=<project folder> pictures the Studio
-            // window on that project. TASJEEL_SNAPSHOT_STUDIO_SAY=<message>
-            // sends a message through the chat first, and
-            // TASJEEL_SNAPSHOT_STUDIO_RENDER=1 presses Create Video.
+            // TASJEEL_SNAPSHOT_STUDIO=<a video's folder inside a project>
+            // pictures the Studio window on that video ("1" opens the most
+            // recent one). TASJEEL_SNAPSHOT_STUDIO_SAY=<message> sends a
+            // message through the chat first, TASJEEL_SNAPSHOT_STUDIO_RENDER=1
+            // presses Create Video, TASJEEL_SNAPSHOT_STUDIO_SHOT=<window name>
+            // takes a screenshot of that window ("*" for any), and
+            // TASJEEL_SNAPSHOT_STUDIO_MEMORY=1 also pictures the memory sheet.
             if let folder = env["TASJEEL_SNAPSHOT_STUDIO"] {
                 await AIConfig.shared.refresh()
-                StudioWindow.shared.open(project: URL(fileURLWithPath: folder, isDirectory: true))
+                StudioWindow.shared.open(video: folder == "1" ? nil : URL(fileURLWithPath: folder, isDirectory: true))
                 if let studio = StudioWindow.shared.model {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     write(windowMatching: "studio", to: directory.appendingPathComponent("studio-start.png"))
@@ -64,7 +67,23 @@ enum DebugSnapshot {
                             try? await Task.sleep(nanoseconds: 100_000_000)
                             waited += 0.1
                         }
-                        print("studio: messages=\(studio.messages.count) scenes=\(studio.outline?.scenes.count ?? -1) problems=\(studio.messages.last?.problems?.count ?? 0) error=\(studio.chatError ?? "none")")
+                        print("studio: messages=\(studio.messages.count) scenes=\(studio.outline?.scenes.count ?? -1) problems=\(studio.messages.last?.problems?.count ?? 0) remembered=\(studio.messages.last?.remembered?.count ?? 0) learned=\(studio.memory.learned.count) error=\(studio.chatError ?? "none")")
+                    }
+                    if let words = env["TASJEEL_SNAPSHOT_STUDIO_SHOT"] {
+                        await AppState.shared.refreshSources()
+                        // "*" takes whichever window is open, for a check that
+                        // does not depend on what happens to be on screen.
+                        if let window = words == "*" ? AppState.shared.windows.first : CaptureSources.window(matching: words, in: AppState.shared.windows) {
+                            studio.captureWindow(window)
+                            var waited = 0.0
+                            while studio.addingMaterials, waited < 20 {
+                                try? await Task.sleep(nanoseconds: 100_000_000)
+                                waited += 0.1
+                            }
+                            print("studio: shot=\(studio.materials.last?.file ?? "none") size=\(studio.materials.last?.width ?? 0)x\(studio.materials.last?.height ?? 0) window=\(studio.memory.app.window) error=\(studio.materialError ?? "none")")
+                        } else {
+                            print("studio: no window matching \(words) among \(Set(AppState.shared.windows.map(\.appName)).sorted()) (screen access=\(AppState.shared.hasScreenAccess))")
+                        }
                     }
                     if env["TASJEEL_SNAPSHOT_STUDIO_RENDER"] != nil {
                         studio.createVideo()
@@ -81,6 +100,16 @@ enum DebugSnapshot {
                     }
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     write(windowMatching: "studio", to: directory.appendingPathComponent("studio.png"))
+                    if env["TASJEEL_SNAPSHOT_STUDIO_MEMORY"] != nil {
+                        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 680), styleMask: [.titled], backing: .buffered, defer: false)
+                        sheet.identifier = NSUserInterfaceItemIdentifier("projectmemory")
+                        sheet.isReleasedWhenClosed = false
+                        sheet.contentView = NSHostingView(rootView: ProjectMemoryView(model: studio))
+                        sheet.orderBack(nil)
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        write(windowMatching: "projectmemory", to: directory.appendingPathComponent("project-memory.png"))
+                        sheet.close()
+                    }
                 }
             }
 
